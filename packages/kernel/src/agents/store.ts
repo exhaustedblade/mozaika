@@ -367,7 +367,10 @@ export class AgentStore<TContext extends object> {
   #moveRow(from: number, to: number): void {
     const agent = this.#agentAt(from);
     this.#agents[to] = agent;
-    this.#identities.copyWithin(to * IDENTITY_WIDTH, from * IDENTITY_WIDTH, (from + 1) * IDENTITY_WIDTH);
+    // Element by element: copyWithin() for two numbers is a call that cost a Sink about 5 % in CI.
+    const identities = this.#identities;
+    identities[to * IDENTITY_WIDTH + ID] = identities[from * IDENTITY_WIDTH + ID] ?? Number.NaN;
+    identities[to * IDENTITY_WIDTH + CREATED_AT] = identities[from * IDENTITY_WIDTH + CREATED_AT] ?? Number.NaN;
     this.#codes[to] = this.#codes[from] ?? 0;
     this.#motion?.moveRow(from, to);
     const width = this.#timersPerRow;

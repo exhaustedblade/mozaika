@@ -236,7 +236,8 @@ export class AgentMotion {
   /** The agent in row `from` moves to row `to`; its pending arrival is pointed at the new row. */
   moveRow(from: number, to: number): void {
     const rows = this.#rows;
-    rows.copyWithin(to * ROW_WIDTH, from * ROW_WIDTH, (from + 1) * ROW_WIDTH);
+    // Element by element, as the population copies its other columns: copyWithin() is a call.
+    for (let cell = 0; cell < ROW_WIDTH; cell++) rows[to * ROW_WIDTH + cell] = rows[from * ROW_WIDTH + cell] ?? 0;
     rows[from * ROW_WIDTH + ARRIVAL_SLOT] = NO_EVENT;
     const slot = rows[to * ROW_WIDTH + ARRIVAL_SLOT] ?? NO_EVENT;
     if (slot !== NO_EVENT) this.#scheduler.retarget(slot, to);
