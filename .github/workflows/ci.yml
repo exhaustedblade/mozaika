@@ -1,0 +1,141 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  # A new push to a pull request supersedes the old run; runs on main all finish.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  types:
+    name: Types
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup
+      - run: pnpm typecheck
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup
+      - run: pnpm lint
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup
+      - run: pnpm test
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup
+      - run: pnpm build
+        env:
+          # Shown on the preview page, so it is clear which commit is being viewed.
+          VITE_COMMIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: viewer
+          path: packages/viewer/dist
+          if-no-files-found: error
+          retention-days: 14
+
+  # Publishes the viewer to GitHub Pages (gh-pages branch) once every check is green:
+  # main goes to the site root, each pull request to its own folder pr-<number>/.
+  preview:
+    name: Preview
+    needs: [types, lint, test, build]
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        github.actor != 'dependabot[bot]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pages: read
+      pull-requests: write
+    concurrency:
+      group: pages-${{ github.event.pull_request.number || 'main' }}
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      COMMIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: viewer
+          path: viewer-dist
+
+      - name: Publish to gh-pages
+        id: publish
+        run: |
+          target=root
+          if [ -n "$PR_NUMBER" ]; then target="pr-$PR_NUMBER"; fi
+          .github/scripts/publish-pages.sh deploy viewer-dist "$target"
+
+          # Pages answers 404 here until it is enabled for the repository.
+          if site=$(gh api "repos/$GITHUB_REPOSITORY/pages" --jq .html_url 2>/dev/null); then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            owner="${GITHUB_REPOSITORY_OWNER,,}"
+            site="https://$owner.github.io/${GITHUB_REPOSITORY#*/}/"
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+          url="${site%/}/"
+          if [ "$target" != root ]; then url="$url$target/"; fi
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "Preview: $url" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Comment preview link on the pull request
+        if: github.event_name == 'pull_request'
+        env:
+          URL: ${{ steps.publish.outputs.url }}
+          PAGES_ENABLED: ${{ steps.publish.outputs.enabled }}
+        run: |
+          marker='<!-- mozaika-preview -->'
+          body="$marker
+          **Превью:** $URL
+          Сборка из коммита ${COMMIT_SHA:0:7}; страница обновляется примерно через минуту после публикации."
+          if [ "$PAGES_ENABLED" != true ]; then
+            body="$body
+
+          ⚠️ GitHub Pages для репозитория ещё не включён, поэтому ссылка пока не открывается. Включить: Settings → Pages → Build and deployment → Source: «Deploy from a branch», ветка \`gh-pages\`, папка \`/ (root)\`. Для приватного репозитория Pages доступен только на платном тарифе (GitHub Pro и выше)."
+          fi
+
+          comments="repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments"
+          existing=$(gh api "$comments" --paginate \
+            --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$marker\"))) | .id" \
+            | head -n 1)
+          if [ -n "$existing" ]; then
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$existing" -f body="$body" > /dev/null
+          else
+            gh api --method POST "$comments" -f body="$body" > /dev/null
+          fi
