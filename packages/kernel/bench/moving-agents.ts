@@ -63,6 +63,7 @@ const SCENARIOS: readonly Scenario[] = [
     agents: 100_000,
     runLength: 4,
     runs: 5,
+    // CI with movement in the kernel: 11–27 units per second, depending on the runner.
     minTimeUnitsPerSecond: 1.2,
     // CI before: 10.6–20.4 units per second, positions 1.03–1.9 ms, snapshot 2.0–2.9 ms.
     before: { timeUnitsPerSecond: 11.9, bytesPerAgent: 337, positionsMilliseconds: 1.56, snapshotMilliseconds: 2.56 },
@@ -72,6 +73,7 @@ const SCENARIOS: readonly Scenario[] = [
     agents: 1_000_000,
     runLength: 0.5,
     runs: 3,
+    // CI with movement in the kernel: 1.0–1.9 units per second.
     minTimeUnitsPerSecond: 0.1,
     // CI before: 0.9–1.31 units per second, positions 11.5–18.1 ms, snapshot 22–32 ms.
     before: { timeUnitsPerSecond: 0.95, bytesPerAgent: 321, positionsMilliseconds: 11.69, snapshotMilliseconds: 29.91 },
