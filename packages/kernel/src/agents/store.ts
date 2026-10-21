@@ -48,7 +48,7 @@ export class AgentStore<TContext extends object> {
   #ids = new Float64Array(INITIAL_CAPACITY);
   #codes = new Uint16Array(INITIAL_CAPACITY);
   /**
-   * The creation time of each agent (П-42). As a field of the agent, a
+   * The creation time of each agent (П-42, П-46). As a field of the agent, a
    * fractional time took a number object of its own: 12 bytes and a cache
    * miss when a Sink reads it.
    */
@@ -134,20 +134,19 @@ export class AgentStore<TContext extends object> {
   /**
    * Removes the agent at `index`: cancels its timeouts and its arrival and
    * moves the last agent into its row, so the columns stay dense. The agent
-   * keeps its last state and its creation time. Its messages still pending
-   * are discarded when they are delivered.
+   * keeps its last state. Its messages still pending are discarded when they
+   * are delivered.
    */
   removeAt(index: number): void {
     const agent = this.#agentAt(index);
     this.cancelTimers(index);
     this.#motion?.remove(index);
     const state = this.stateAt(index);
-    const createdAt = this.createdAtOf(index);
     this.#counts[state.code] = (this.#counts[state.code] ?? 0) - 1;
     const last = this.#agents.length - 1;
     if (index !== last) this.#moveRow(last, index);
     this.#agents.pop();
-    agentFriend.markRemoved(agent, state.code, createdAt);
+    agentFriend.markRemoved(agent, state.code);
   }
 
   /** The agent begins a step; see isStepping. */

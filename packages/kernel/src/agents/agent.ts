@@ -66,8 +66,8 @@ export interface AgentFriend {
   remove<TContext extends object>(agent: Agent<TContext>): boolean;
   /** Sets the agent's row of the columns after another agent's removal moved it there. */
   moveTo<TContext extends object>(agent: Agent<TContext>, index: number): void;
-  /** The population has removed the agent: it keeps the state it was in and its creation time. */
-  markRemoved<TContext extends object>(agent: Agent<TContext>, stateCode: number, createdAt: number): void;
+  /** The population has removed the agent: it keeps the state it was in. */
+  markRemoved<TContext extends object>(agent: Agent<TContext>, stateCode: number): void;
 }
 
 /**
@@ -89,11 +89,6 @@ export class Agent<TContext extends object = object> {
    * into its place, so every access to the columns reads it anew.
    */
   #index: number;
-  /**
-   * The creation time of a removed agent, which has left the columns; undefined
-   * while the agent is in them, so the field holds no number object until then.
-   */
-  #createdAtAfterRemoval: number | undefined = undefined;
 
   static {
     agentFriend = {
@@ -110,9 +105,8 @@ export class Agent<TContext extends object = object> {
       moveTo: (agent, index) => {
         agent.#index = index;
       },
-      markRemoved: (agent, stateCode, createdAt) => {
+      markRemoved: (agent, stateCode) => {
         agent.#index = removedPlace(stateCode);
-        agent.#createdAtAfterRemoval = createdAt;
       },
     };
   }
@@ -129,10 +123,15 @@ export class Agent<TContext extends object = object> {
     this.#start();
   }
 
-  /** Model time at which the agent was created. */
+  /**
+   * Model time at which the agent was created, kept in a column of the
+   * population (П-46). A removed agent has left the columns and no longer
+   * knows it: asking is an error, as for its position. Keeping it would cost
+   * a number object per agent or per removal, which slowed flows of agents
+   * through a Sink by up to a tenth; read it before the removal, as Sink does.
+   */
   get createdAt(): number {
-    const index = this.#index;
-    return index >= 0 ? this.#store.createdAtOf(index) : (this.#createdAtAfterRemoval ?? Number.NaN);
+    return this.#store.createdAtOf(this.#rowToUse('tell when it was created'));
   }
 
   get population(): AgentPopulation<TContext> {

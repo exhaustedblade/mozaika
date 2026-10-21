@@ -192,7 +192,7 @@ describe('agent populations: removing agents', () => {
     expect(agents.add().id).toBe(6);
   });
 
-  it('keeps the creation time of every agent through removals, and a removed agent keeps its own', () => {
+  it('keeps the creation time of every agent through removals; a removed agent no longer tells its own', () => {
     const sim = new Simulation();
     const agents = new AgentPopulation(sim, { name: 'agents', statechart: twoStates });
     const created: Agent[] = [];
@@ -212,9 +212,10 @@ describe('agent populations: removing agents', () => {
       [4, 2.75],
       [3, 1.5],
     ]);
-    expect(removed.createdAt).toBe(0.25);
+    // It has left the columns (П-46): asking is an error, as for its position.
+    expect(() => removed.createdAt).toThrow(simulationError('INVALID_STATE', { message: containing('agents#2') }));
     agents.remove(first);
-    expect([first.createdAt, third.createdAt, last.createdAt]).toEqual([0, 1.5, 2.75]);
+    expect([third.createdAt, last.createdAt]).toEqual([1.5, 2.75]);
     // A new agent in a row left by a removed one gets the time of its own creation.
     expect(agents.add().createdAt).toBe(10);
   });
