@@ -42,6 +42,19 @@ jobs:
       - uses: ./.github/actions/setup
       - run: pnpm test
 
+  bench:
+    name: Benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup
+      # The benchmark prints a Markdown table of events per second; it also goes to
+      # the job summary. With `shell: bash` the step runs with pipefail, so a run
+      # below the threshold fails the step despite the pipe into tee.
+      - run: pnpm --silent bench | tee -a "$GITHUB_STEP_SUMMARY"
+        shell: bash
+
   build:
     name: Build
     runs-on: ubuntu-latest
@@ -64,7 +77,7 @@ jobs:
   # main goes to the site root, each pull request to its own folder pr-<number>/.
   preview:
     name: Preview
-    needs: [types, lint, test, build]
+    needs: [types, lint, test, bench, build]
     if: >-
       (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
       (github.event_name == 'pull_request' &&

@@ -13,7 +13,8 @@
     "lint": "eslint .",
     "test": "vitest run",
     "build": "pnpm -r build",
-    "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm build",
+    "bench": "pnpm --filter @mozaika/kernel bench",
+    "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm bench",
     "dev": "pnpm --filter @mozaika/viewer dev"
   },
   "devDependencies": {
