@@ -28,7 +28,7 @@ const AGENTS = 100_000;
 /** Model time of each measured run: about AGENTS × RUN_LENGTH events. */
 const RUN_LENGTH = 4;
 const RUNS = 5;
-const MIN_TIME_UNITS_PER_SECOND = 0.25;
+const MIN_TIME_UNITS_PER_SECOND = 0.5;
 const MAX_BYTES_PER_AGENT = 5_000;
 
 const flip = defineStatechart(
