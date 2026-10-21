@@ -10,7 +10,7 @@ import type { SnapshotReply } from '@mozaika/kernel/worker';
 import type { Messages } from './i18n.js';
 import { KernelClient } from './kernel-client.js';
 import { MotionCanvas, STATE_COLOURS } from './motion-view.js';
-import { HALL, type WalkwayParameters, walkway } from './walkway.js';
+import { HALL, WALKWAY_DEFAULTS, type WalkwayParameters } from './walkway.js';
 
 /** Units of model time per second of real time at the start. */
 const TIME_SCALE = 4;
@@ -25,7 +25,7 @@ interface Slider {
   readonly value: number;
 }
 
-const DEFAULTS = walkway.parameters ?? { arrivalsPerUnit: 20, speed: 8 };
+const DEFAULTS = WALKWAY_DEFAULTS;
 const SLIDERS: readonly Slider[] = [
   { key: 'arrivals', min: 1, max: 200, step: 1, value: DEFAULTS.arrivalsPerUnit },
   { key: 'speed', min: 1, max: 30, step: 1, value: DEFAULTS.speed },
@@ -55,6 +55,7 @@ export class MotionCheck {
   #paused = false;
   /** The snapshot being drawn; given back to the kernel when the next one comes. */
   #current: SnapshotReply | undefined;
+  /** True while a request is on its way: the next snapshot is asked for once it is answered. */
   #waiting = false;
   #lastFrame: number | undefined;
   #counted = { since: 0, frames: 0, snapshots: 0 };

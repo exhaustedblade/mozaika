@@ -17,6 +17,9 @@ export const HALL = { width: 100, height: 60, door: { from: 24, to: 36 } } as co
 // eslint-disable-next-line @typescript-eslint/consistent-type-definitions
 export type WalkwayParameters = { arrivalsPerUnit: number; speed: number };
 
+/** The parameters the walkway starts with. */
+export const WALKWAY_DEFAULTS: WalkwayParameters = { arrivalsPerUnit: 20, speed: 8 };
+
 /** How long a person stays in the hall, and how long the way out takes. */
 const STAY = { shortest: 15, longest: 30 } as const;
 const WAY_OUT = 6;
@@ -36,7 +39,7 @@ const person = defineStatechart({
 });
 
 export const walkway: ModelDefinition<WalkwayParameters> = {
-  parameters: { arrivalsPerUnit: 20, speed: 8 },
+  parameters: WALKWAY_DEFAULTS,
   build({ simulation, parameters }) {
     const people = new AgentPopulation(simulation, { name: 'people', statechart: person });
     const moves = simulation.random.stream('moves');
