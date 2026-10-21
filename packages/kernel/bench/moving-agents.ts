@@ -4,24 +4,29 @@
  * makes a walk last about one unit of model time; on arriving, an agent picks
  * the next point. Prints a Markdown table, which CI also puts into the job
  * summary: units of model time per second of real time, events per second,
- * the memory an agent takes, and the time of a snapshot of the whole
- * population — its positions alone, and every column a viewer gets.
+ * the memory an agent takes, and the time to get the whole population at
+ * once — its positions (population.positions()) and a snapshot for a viewer
+ * (PopulationSnapshots: ids, states, creation times and segments in a
+ * transferable buffer).
  *
- * This first version moves the agents as a model has to without movement in
- * the kernel: the segment of the walk is kept in the agent's fields, the
- * arrival is a timeout, and a snapshot reads every agent's fields. It is the
- * measurement "before" Ф0-6а, taken by CI with the same script.
+ * The agents move as the kernel moves them since Ф0-6а: a segment in the
+ * columns of the population and one arrival event per walk. The table also
+ * shows the medians of CI before Ф0-6а, when a model had to keep the segment
+ * in the agent's fields, make the arrival a timeout and read every agent for
+ * a snapshot (the first version of this script, commit cfa0f16).
  *
  * Memory: the garbage collector runs before and after the population is
  * built; the difference of the heap plus array buffers is the population's
  * cost, its pending arrivals in the event queue included. Needs
  * `node --expose-gc`.
  *
- * It measures the built package (dist), as other packages run it.
+ * It measures the built package (dist), as other packages run it. As in the
+ * other benchmarks, the speed thresholds are about ten times below the slower
+ * runs in CI, so that a slow machine passes but a real regression fails.
  *
  * Run: pnpm bench
  */
-import { AgentPopulation, defineStatechart, Simulation } from '@mozaika/kernel';
+import { AgentPopulation, defineStatechart, PopulationSnapshots, Simulation } from '@mozaika/kernel';
 
 /** Node's memory report; declared here so that the benchmark needs no @types/node. */
 declare const process: { memoryUsage(): { heapUsed: number; arrayBuffers: number } };
@@ -33,72 +38,63 @@ declare const gc: (() => void) | undefined;
  * this speed a walk lasts one unit of model time on average, so each agent
  * makes about one arrival per unit, like the agents of agents.ts change state.
  */
-const SPEED = 0.5214;
+const WALK = { speed: 0.5214 };
 /** Snapshots taken for each measurement of their time; the median is shown. */
 const SNAPSHOTS = 9;
+const MAX_BYTES_PER_AGENT = 320;
 
 interface Scenario {
   readonly agents: number;
   /** Model time of each measured run: about agents × runLength events. */
   readonly runLength: number;
   readonly runs: number;
+  readonly minTimeUnitsPerSecond: number;
+  /** Before Ф0-6а, in CI: the segment in the agent's fields (commit cfa0f16; medians of 5 runs). */
+  readonly before: {
+    readonly timeUnitsPerSecond: number;
+    readonly bytesPerAgent: number;
+    readonly positionsMilliseconds: number;
+    readonly snapshotMilliseconds: number;
+  };
 }
 
 const SCENARIOS: readonly Scenario[] = [
-  { agents: 100_000, runLength: 4, runs: 5 },
+  {
+    agents: 100_000,
+    runLength: 4,
+    runs: 5,
+    minTimeUnitsPerSecond: 1.2,
+    // CI before: 10.6–20.4 units per second, positions 1.03–1.9 ms, snapshot 2.0–2.9 ms.
+    before: { timeUnitsPerSecond: 11.9, bytesPerAgent: 337, positionsMilliseconds: 1.56, snapshotMilliseconds: 2.56 },
+  },
   // The goal of П-18. Shorter runs: each unit of model time is a million events.
-  { agents: 1_000_000, runLength: 0.5, runs: 3 },
+  {
+    agents: 1_000_000,
+    runLength: 0.5,
+    runs: 3,
+    minTimeUnitsPerSecond: 0.1,
+    // CI before: 0.9–1.31 units per second, positions 11.5–18.1 ms, snapshot 22–32 ms.
+    before: { timeUnitsPerSecond: 0.95, bytesPerAgent: 321, positionsMilliseconds: 11.69, snapshotMilliseconds: 29.91 },
+  },
 ];
 
-/** The walk an agent is on, in its fields: from where, to where, when it started and when it arrives. */
-interface Walk {
-  fromX: number;
-  fromY: number;
-  toX: number;
-  toY: number;
-  start: number;
-  arrival: number;
-}
-
-/** Where a walker is at `time`: on the straight line of its walk, or at its end once it has arrived. */
-function walkerX(walk: Walk, time: number): number {
-  if (time >= walk.arrival) return walk.toX;
-  return walk.fromX + (walk.toX - walk.fromX) * ((time - walk.start) / (walk.arrival - walk.start));
-}
-
-function walkerY(walk: Walk, time: number): number {
-  if (time >= walk.arrival) return walk.toY;
-  return walk.fromY + (walk.toY - walk.fromY) * ((time - walk.start) / (walk.arrival - walk.start));
-}
-
 /** Every agent starts at the origin and walks; each arrival re-enters `walking`, which starts the next walk. */
-const walker = defineStatechart<Walk>(
-  {
-    id: 'walker',
-    initial: 'walking',
-    context: { fromX: 0, fromY: 0, toX: 0, toY: 0, start: 0, arrival: 0 },
-    states: {
-      walking: {
-        entry: ({ context: walk, now, random }) => {
-          const x = walkerX(walk, now);
-          const y = walkerY(walk, now);
-          walk.fromX = x;
-          walk.fromY = y;
-          walk.toX = random.uniform();
-          walk.toY = random.uniform();
-          walk.start = now;
-          walk.arrival = now + Math.hypot(walk.toX - x, walk.toY - y) / SPEED;
-        },
-        after: { arrival: { target: 'walking', reenter: true } },
+const walker = defineStatechart({
+  id: 'walker',
+  initial: 'walking',
+  states: {
+    walking: {
+      entry: ({ agent, random }) => {
+        agent.moveTo({ x: random.uniform(), y: random.uniform() }, WALK);
       },
+      on: { 'agent.arrived': { target: 'walking', reenter: true } },
     },
   },
-  { delays: { arrival: ({ context: walk, now }) => walk.arrival - now } },
-);
+});
 
 interface Model {
   readonly simulation: Simulation;
-  readonly walkers: AgentPopulation<Walk>;
+  readonly walkers: AgentPopulation;
 }
 
 function buildModel(agents: number): Model {
@@ -108,26 +104,12 @@ function buildModel(agents: number): Model {
   return { simulation, walkers };
 }
 
-/** The positions of all agents now, x and y of each in turn, as a viewer would draw them. */
-function positions(model: Model, into: Float32Array): void {
-  const now = model.simulation.now;
-  let cell = 0;
-  for (const agent of model.walkers.agents) {
-    into[cell++] = walkerX(agent.context, now);
-    into[cell++] = walkerY(agent.context, now);
-  }
-}
-
-/** Every column a viewer gets: ids, states, creation times and positions. */
-function snapshot(model: Model, positionsInto: Float32Array): number {
-  const ids = model.walkers.ids();
-  const states = model.walkers.stateCodes();
-  const createdAt = new Float64Array(model.walkers.size);
-  model.walkers.agents.forEach((agent, row) => {
-    createdAt[row] = agent.createdAt;
-  });
-  positions(model, positionsInto);
-  return ids.length + states.length + createdAt.length;
+/** A snapshot as a viewer gets it, given back at once as the viewer would after drawing it. */
+function snapshot(snapshots: PopulationSnapshots): number {
+  const taken = snapshots.take();
+  if (taken === undefined) throw new Error('No free snapshot buffer: every snapshot is given back');
+  snapshots.giveBack(taken);
+  return taken.size;
 }
 
 function collectGarbage(): void {
@@ -173,7 +155,8 @@ function measure(scenario: Scenario): Measurement {
   const { agents, runLength, runs } = scenario;
   const warmUp = buildModel(Math.min(agents / 10, 100_000)); // warm up the JIT compiler
   warmUp.simulation.run(runLength);
-  snapshot(warmUp, new Float32Array(2 * warmUp.walkers.size));
+  warmUp.walkers.positions();
+  snapshot(new PopulationSnapshots(warmUp.walkers));
 
   collectGarbage();
   const before = usedMemory();
@@ -193,12 +176,15 @@ function measure(scenario: Scenario): Measurement {
   }
   const milliseconds = median(durations);
 
-  const into = new Float32Array(2 * model.walkers.size);
+  // Into one array, as a model that reads the positions often would: a new array per call
+  // would measure the garbage collector rather than the positions.
+  const positions = new Float64Array(2 * model.walkers.size);
   const positionsMilliseconds = timeOf(() => {
-    positions(model, into);
+    model.walkers.positions(positions);
   }, SNAPSHOTS);
+  const snapshots = new PopulationSnapshots(model.walkers);
   const snapshotMilliseconds = timeOf(() => {
-    snapshot(model, into);
+    snapshot(snapshots);
   }, SNAPSHOTS);
   return {
     scenario,
@@ -217,6 +203,13 @@ const decimal = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 });
 const tableRow = (...cells: string[]): string => `| ${cells.join(' | ')} |`;
 
 const measurements = SCENARIOS.map(measure);
+const problems: string[] = [];
+for (const { scenario, timeUnitsPerSecond, bytesPerAgent } of measurements) {
+  const agents = number.format(scenario.agents);
+  if (timeUnitsPerSecond < scenario.minTimeUnitsPerSecond) problems.push(`${agents} агентов: скорость ниже порога`);
+  if (bytesPerAgent > MAX_BYTES_PER_AGENT) problems.push(`${agents} агентов: память выше потолка`);
+}
+
 const columns = (pick: (measurement: Measurement) => string): string[] => measurements.map(pick);
 const report = [
   '',
@@ -231,12 +224,31 @@ const report = [
   tableRow('Память всего, МБ', ...columns((m) => decimal.format(m.megabytes))),
   tableRow('Позиции всех агентов, мс', ...columns((m) => decimal.format(m.positionsMilliseconds))),
   tableRow('Снимок популяции, мс', ...columns((m) => decimal.format(m.snapshotMilliseconds))),
+  tableRow('Порог, единиц времени в секунду', ...columns((m) => decimal.format(m.scenario.minTimeUnitsPerSecond))),
+  tableRow(
+    'До Ф0-6а в CI: единиц времени в секунду',
+    ...columns((m) => decimal.format(m.scenario.before.timeUnitsPerSecond)),
+  ),
+  tableRow(
+    'Быстрее, чем до Ф0-6а в CI, раз',
+    ...columns((m) => decimal.format(m.timeUnitsPerSecond / m.scenario.before.timeUnitsPerSecond)),
+  ),
+  tableRow('До Ф0-6а в CI: байт на агента', ...columns((m) => number.format(m.scenario.before.bytesPerAgent))),
+  tableRow('До Ф0-6а в CI: позиции, мс', ...columns((m) => decimal.format(m.scenario.before.positionsMilliseconds))),
+  tableRow('До Ф0-6а в CI: снимок, мс', ...columns((m) => decimal.format(m.scenario.before.snapshotMilliseconds))),
   '',
   'Агент идёт по прямой из одной случайной точки единичного квадрата в другую, в среднем единицу времени, ' +
-    'и, придя, выбирает следующую. Движение — в полях агента, прибытие — таймаут: так модель двигала агентов ' +
-    'до Ф0-6а. Скорость — медиана нескольких отрезков модельного времени после разогрева. ' +
+    'и, придя, выбирает следующую: `moveTo` и переход по `agent.arrived`. ' +
+    'Скорость — медиана нескольких отрезков модельного времени после разогрева. ' +
     'Память — прирост кучи и буферов типизированных массивов после сборки мусора, ' +
     'вместе с ожидающими прибытиями в очереди событий. ' +
-    `Снимок — номера, состояния, время создания и позиции (x, y во Float32Array); медиана ${String(SNAPSHOTS)} снимков.`,
+    'Позиции — `population.positions(into)` в один и тот же массив; снимок — номера, состояния, ' +
+    `время создания и отрезки в одном буфере (\`PopulationSnapshots\`); медиана ${String(SNAPSHOTS)} раз.`,
+  `Потолок памяти: ${number.format(MAX_BYTES_PER_AGENT)} байт на агента.`,
+  '«До Ф0-6а» — движение в полях агента и прибытие таймаутом, снимок обходом агентов (коммит cfa0f16), ' +
+    'медианы 5 прогонов CI. Раннеры GitHub разные, отношение — ориентир (DECISIONS, П-47).',
 ];
+if (problems.length > 0) report.push('', `**${problems.join('; ')}.**`);
 console.log(report.join('\n'));
+
+if (problems.length > 0) throw new Error(`The moving agents benchmark failed: ${problems.join('; ')}`);
