@@ -72,13 +72,20 @@ jobs:
             (cd "$dir/packages/kernel" && node --expose-gc bench/moving-agents.ts) | grep -E '^\| (Единиц|Память на)' | sed "s/^/$side $round M /"
             (cd "$dir/packages/blocks" && node bench/mm1.ts && node --expose-gc bench/crowded-delay.ts) | grep -E '^\| (M/M/1|Единиц|Память на)' | sed "s/^/$side $round B /"
           }
-          for round in 1 2 3 4 5; do
-            # Who goes first alternates, so that neither side always runs on a warmer machine.
-            if [ $((round % 2)) = 1 ]; then
-              measure main $round ../main-ab; measure branch $round .
-            else
-              measure branch $round .; measure main $round ../main-ab
-            fi
+          # Variants of the branch: the same code with other constants of the ladder queue.
+          for variant in t200:200:4 e1:50:1; do
+            IFS=: read -r name threshold perBucket <<< "$variant"
+            git worktree add "../$name" HEAD
+            cp packages/kernel/bench/*.ts "../$name/packages/kernel/bench/"
+            (cd "../$name" && pnpm install --frozen-lockfile > /dev/null && pnpm --filter @mozaika/kernel --filter @mozaika/blocks build > /dev/null)
+            sed -i "s/^const SPLIT_THRESHOLD = 50;/const SPLIT_THRESHOLD = $threshold;/; s/^const EVENTS_PER_BUCKET = 4;/const EVENTS_PER_BUCKET = $perBucket;/" "../$name/packages/kernel/dist/ladder-queue.js"
+            grep -E '^const (SPLIT_THRESHOLD|EVENTS_PER_BUCKET)' "../$name/packages/kernel/dist/ladder-queue.js"
+          done
+          for round in 1 2 3 4; do
+            # The order of the sides turns each round, so that none always runs on a warmer machine.
+            sides="main:../main-ab branch:. t200:../t200 e1:../e1"
+            for shift in $(seq 1 $(( (round - 1) % 4 ))); do sides="$(echo $sides | cut -d' ' -f2-) $(echo $sides | cut -d' ' -f1)"; done
+            for side in $sides; do measure "${side%%:*}" $round "${side#*:}"; done
           done
       - name: CPU profiles of the crowded Delay and M/M/1 (temporary)
         shell: bash
