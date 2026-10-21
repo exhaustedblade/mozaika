@@ -9,6 +9,9 @@
       "@mozaika/source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./test-support": {
+      "@mozaika/source": "./src/test-support/index.ts"
     }
   },
   "scripts": {

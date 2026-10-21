@@ -1,9 +1,10 @@
 import { type AnyPopulation, PopulationSnapshots, Simulation } from '@mozaika/kernel';
-import { KernelHost, type KernelReply, type KernelRequest, type SnapshotReply } from '@mozaika/kernel/worker';
+import type { SnapshotReply } from '@mozaika/kernel/worker';
 import { describe, expect, it } from 'vitest';
 
-import { KernelClient, KernelError, type WorkerPort } from './kernel-client.js';
+import { KernelClient, KernelError } from './kernel-client.js';
 import { positionsAt } from './motion-view.js';
+import { workerInThisThread } from './test-support/worker-in-this-thread.js';
 import { HALL, walkway } from './walkway.js';
 
 /** The walkway built directly, without a worker, run to `until`. */
@@ -14,23 +15,6 @@ function walkwayAt(until: number): { people: AnyPopulation } {
   if (people === undefined) throw new Error('the walkway has no population');
   simulation.run(until);
   return { people };
-}
-
-/**
- * A stand-in for a Web Worker that runs the kernel's host in the same thread:
- * the same handler as the worker's script, with the reply posted back on a
- * later turn, as a worker's message would be.
- */
-function workerInThisThread(): WorkerPort {
-  const host = new KernelHost({ walkway });
-  const port: WorkerPort = {
-    onmessage: null,
-    postMessage(message: KernelRequest) {
-      const { reply } = host.handle(message);
-      queueMicrotask(() => port.onmessage?.({ data: reply } as MessageEvent<KernelReply>));
-    },
-  };
-  return port;
 }
 
 describe('walkway model', () => {
@@ -92,7 +76,7 @@ describe('positions between snapshots', () => {
 
 describe('kernel client', () => {
   it('builds, runs and takes snapshots through the messages of the worker, and gives the buffers back', async () => {
-    const client = new KernelClient(workerInThisThread());
+    const client = new KernelClient(workerInThisThread({ walkway }));
     const built = await client.build('walkway', 1);
     expect(built.populations).toEqual([{ name: 'people', stateNames: ['entering', 'waiting', 'leaving'] }]);
     const [ran, first] = await Promise.all([client.run(20), client.snapshot()]);

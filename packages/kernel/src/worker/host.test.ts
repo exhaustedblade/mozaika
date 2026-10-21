@@ -118,6 +118,55 @@ describe('kernel host: building and running', () => {
   });
 });
 
+describe('kernel host: records for charts', () => {
+  /** The walkway with a record of how many people are on it, every unit of model time. */
+  function countedWalkway(): ModelDefinition<WalkwayParameters> {
+    const model = walkwayModel();
+    return {
+      ...model,
+      build(setup) {
+        const built = model.build(setup);
+        const [walkers] = built.populations;
+        const records = setup.simulation.recordSnapshots({ every: 1, capture: () => walkers?.size ?? 0 });
+        return { ...built, records };
+      },
+    };
+  }
+
+  it('answers a run with the records the model took during it, and each record once', () => {
+    const host = new KernelHost({ walkway: countedWalkway() });
+    ask(host, { type: 'build', id: 1, model: 'walkway', seed: 3 });
+    const first = ask(host, { type: 'run', id: 2, until: 3.5 });
+    expect(first.type === 'ran' && first.records?.map((record) => record.time)).toEqual([0, 1, 2, 3]);
+    const second = ask(host, { type: 'run', id: 3, until: 6 });
+    expect(second.type === 'ran' && second.records?.map((record) => record.time)).toEqual([4, 5, 6]);
+    expect(second.type === 'ran' && second.records?.every((record) => typeof record.data === 'number')).toBe(true);
+    // A run that reaches no new record moment brings an empty list.
+    expect(ask(host, { type: 'run', id: 4, until: 6.5 })).toMatchObject({ type: 'ran', records: [] });
+  });
+
+  it('gives the same records as the model run without the host', () => {
+    const host = new KernelHost({ walkway: countedWalkway() });
+    ask(host, { type: 'build', id: 1, model: 'walkway', seed: 3 });
+    const viaHost = [2, 5.5, 9].flatMap((until, index) => {
+      const reply = ask(host, { type: 'run', id: index + 2, until });
+      return reply.type === 'ran' ? (reply.records ?? []) : [];
+    });
+
+    const simulation = new Simulation({ seed: 3 });
+    const { records } = countedWalkway().build({ simulation, parameters: { arrivalsPerUnit: 4, speed: 2 } });
+    simulation.run(9);
+    expect(viaHost).toHaveLength(10);
+    expect(viaHost).toEqual(records?.take());
+  });
+
+  it('answers a run without records when the model keeps none', () => {
+    const host = new KernelHost({ walkway: walkwayModel() });
+    ask(host, { type: 'build', id: 1, model: 'walkway', seed: 3 });
+    expect(ask(host, { type: 'run', id: 2, until: 2 })).not.toHaveProperty('records');
+  });
+});
+
 describe('kernel host: snapshots', () => {
   it('gives a snapshot of every population, with its buffers in the list to transfer', () => {
     const built: Partial<Built> = {};
