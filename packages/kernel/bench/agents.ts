@@ -46,7 +46,8 @@ const SCENARIOS: readonly Scenario[] = [
     agents: 100_000,
     runLength: 4,
     runs: 5,
-    minTimeUnitsPerSecond: 0.5,
+    // CI on the kernel of typed arrays: 14–22 units per second, depending on the runner.
+    minTimeUnitsPerSecond: 1.5,
     before: { timeUnitsPerSecond: 6.51, bytesPerAgent: 344 },
   },
   // The goal of П-18. Shorter runs: each unit of model time is a million events.
@@ -54,7 +55,8 @@ const SCENARIOS: readonly Scenario[] = [
     agents: 1_000_000,
     runLength: 0.5,
     runs: 3,
-    minTimeUnitsPerSecond: 0.03,
+    // CI: 0.8–1.0 units per second.
+    minTimeUnitsPerSecond: 0.08,
     before: { timeUnitsPerSecond: 0.31, bytesPerAgent: 345 },
   },
 ];
