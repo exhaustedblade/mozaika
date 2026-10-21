@@ -23,7 +23,7 @@ describe('an agent as an entity', () => {
       { delays: { patience: ({ context }) => context.patience } },
     );
     const customers = new AgentPopulation(sim, { name: 'customers', statechart: customer });
-    const created: Agent[] = [];
+    const created: Agent<{ patience: number }>[] = [];
 
     // Arrivals at 1, 2, 3, 4; one clerk serves each for 3. The Service holds
     // only the customer being served, so the others wait in the Queue, and

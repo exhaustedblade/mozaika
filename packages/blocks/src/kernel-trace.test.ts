@@ -11,7 +11,7 @@ import { Recorder } from './test-support/helpers.js';
  * pool handed over in FIFO order, lost arrivals. `end` builds the block the
  * flow ends in. Returns the blocks, to read their statistics.
  */
-function buildFlow(sim: Simulation, end: (sim: Simulation) => EntityReceiver) {
+function buildFlow<End extends EntityReceiver>(sim: Simulation, end: (sim: Simulation) => End) {
   const clerks = new ResourcePool(sim, { name: 'clerks', capacity: 2 });
   const source = new Source(sim, { name: 'door', interval: (random) => random.exponential(0.6) });
   const hall = source.connect(new Queue(sim, { name: 'hall', capacity: 4 }));
@@ -99,6 +99,30 @@ describe('blocks on the kernel', () => {
     expect(first.length).toBeGreaterThan(1_000);
     expect(traceOfFlow(2026)).toEqual(first);
     expect(traceOfFlow(2027)).not.toEqual(first);
+  });
+
+  it('fire the events recorded for the blocks on kernel events', () => {
+    // Recorded when the blocks moved to kernel events (Ф0-4в). The blocks on
+    // processes fired 2 200 events here (fingerprint e267f3ce): 511 of the
+    // source and 1 689 of the processes of the entities. Now 1 791: the
+    // source's 511 are as before, the 409 starts of entity processes (one per
+    // arrival that got in) are gone, and the other entity events remain one
+    // for one as events of the blocks — 403 ends of service, 401 ends of
+    // delay, 348 places at the desk and 128 in the corridor granted to waiting
+    // entities. Their numbers are lower by the starts that no longer take one.
+    const trace = traceOfFlow(2026);
+    expect({ events: trace.length, fingerprint: fingerprint(trace) }).toEqual({
+      events: 1791,
+      fingerprint: 'c004c997',
+    });
+    expect(trace.slice(0, 6)).toEqual([
+      '0 0 #0 door',
+      '0.24420428898192564 0 #1 door',
+      '0.41928868011488407 0 #3 door',
+      '0.4429266748670181 0 #5 door',
+      '0.46523077629104115 0 #4 desk: door#2 service ends',
+      '0.46523077629104115 0 #7 desk places → door#3 at hall',
+    ]);
   });
 
   it('give the same outcomes as the blocks on processes before Ф0-4в', () => {
