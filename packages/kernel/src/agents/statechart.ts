@@ -27,6 +27,12 @@ export class Statechart<TContext extends object = object> {
   readonly initial: StateNode<TContext>;
   /** Every timer of every state, by `index`. */
   readonly timers: readonly Timer<TContext>[];
+  /**
+   * Number of regions, each with its own current state. One — the whole
+   * statechart — until parallel states are supported; then a population will
+   * keep a column of state codes per region (П-30).
+   */
+  readonly regionCount = 1;
   readonly #statesByName: ReadonlyMap<string, StateNode<TContext>>;
   readonly #createContext: (args: ContextArgs) => TContext;
 

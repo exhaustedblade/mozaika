@@ -2,81 +2,155 @@
  * The data a population shares with its agents. Internal to the agents module:
  * model code sees it through AgentPopulation and Agent.
  */
+import { DEFAULT_PRIORITY } from '../event-queue.js';
 import type { Random } from '../random.js';
+import { type EventKind, type Scheduler, schedulerOf } from '../scheduler.js';
 import type { Simulation } from '../simulation.js';
-import type { Agent } from './agent.js';
+import { grown } from '../typed-arrays.js';
+import { type Agent, agentFriend, REMOVED } from './agent.js';
 import type { StateNode, Timer } from './compile.js';
+import type { AgentEvent } from './definition.js';
+import { AgentMessages } from './messages.js';
+import type { AgentPopulation } from './population.js';
 import type { Statechart } from './statechart.js';
 
-/** First length of the dense array of state codes; it doubles whenever the population outgrows it. */
+/** First number of rows of the columns; they double whenever the population outgrows them. */
 const INITIAL_CAPACITY = 1024;
 
+/** A cell of the timer column without a pending timeout. */
+const NO_EVENT = -1;
+
 /**
- * Agents of one population and their state codes in a dense array, indexed by
- * creation order: the form a snapshot of a large population takes
- * (docs/ARCHITECTURE.md, "Большие популяции"). Also the random streams and
- * event labels the agents share.
+ * The agents of one population and their columns (docs/AGENTS.md, section 6;
+ * П-30): row i holds the agent's id, its state code and the slots of its
+ * pending timeouts. The rows are dense, in the order of creation until an
+ * agent is removed: then the last agent moves into its row. Dense columns are
+ * the form a snapshot of a large population takes (docs/ARCHITECTURE.md,
+ * "Большие популяции"). Also the random streams the agents share and the two
+ * kinds of events the population registers: timeouts and messages.
  */
 export class AgentStore<TContext extends object> {
+  readonly population: AgentPopulation<TContext>;
   readonly simulation: Simulation;
   readonly name: string;
   readonly statechart: Statechart<TContext>;
   /** Stream of actions, guards and field functions: agents/<population>. */
   readonly random: Random;
-  /** In creation order: the agent with index i has id i + 1. */
-  readonly agents: Agent<TContext>[] = [];
-  /** Messages that found no enabled transition (docs/AGENTS.md, section 4.3). */
+  /** Messages that found no enabled transition or a removed agent (docs/AGENTS.md, section 4.3). */
   discardedMessages = 0;
+  readonly #scheduler: Scheduler;
+  readonly #timeoutKind: number;
+  readonly #messages: AgentMessages<TContext>;
+  readonly #agents: Agent<TContext>[] = [];
+  #ids = new Float64Array(INITIAL_CAPACITY);
+  #codes = new Uint16Array(INITIAL_CAPACITY);
+  /** Room in each row for the timeouts of one state: the most any state of the statechart has. */
+  readonly #timersPerRow: number;
+  /** Slots of the pending timeouts, #timersPerRow cells per row; NO_EVENT where there is none. */
+  #timers: Int32Array;
+  /** Cell of each timer within a row, by timer index: its place among the timers of its state. */
+  readonly #timerCells: readonly number[];
   /** Stream of each timer's delay function, by timer index; undefined for fixed delays. */
   readonly #timerStreams: readonly (Random | undefined)[];
-  /**
-   * Event labels, made once rather than per event: a new string for every
-   * event of many agents costs about a fifth of the speed. So a label names
-   * the population and the transition, not the agent; errors name the agent.
-   */
+  /** The end of each timer's label, by timer index: ": <state> after <key>". */
   readonly #timerLabels: readonly string[];
-  readonly #messageLabels = new Map<string, string>();
-  /** State code of each agent, by index. */
-  #codes = new Uint16Array(INITIAL_CAPACITY);
   /** Number of agents in each state, by state code. */
   readonly #counts: number[];
+  #created = 0;
+  /** Agents that asked to be removed during their own step: they leave when it ends. */
+  readonly #leaving = new Set<Agent<TContext>>();
+  /** The state each removed agent was in, so that it can still tell it. */
+  readonly #removedStates = new WeakMap<Agent<TContext>, StateNode<TContext>>();
 
-  constructor(simulation: Simulation, name: string, statechart: Statechart<TContext>) {
-    this.simulation = simulation;
-    this.name = name;
-    this.statechart = statechart;
-    this.random = simulation.random.stream('agents').stream(name);
+  constructor(population: AgentPopulation<TContext>) {
+    this.population = population;
+    this.simulation = population.simulation;
+    this.name = population.name;
+    this.statechart = population.statechart;
+    this.#scheduler = schedulerOf(this.simulation);
+    this.random = this.simulation.random.stream('agents').stream(this.name);
     // One stream per named delay, created once here: creating a stream is costly (docs/AGENTS.md, section 7).
-    this.#timerStreams = statechart.timers.map((timer) =>
+    this.#timerStreams = this.statechart.timers.map((timer) =>
       timer.streamName === undefined ? undefined : this.random.stream(timer.streamName),
     );
+    const cells: number[] = [];
     const labels: string[] = [];
-    for (const state of statechart.states) {
-      for (const timer of state.after) labels[timer.index] = `${name}: ${state.name} after ${timer.key}`;
+    for (const state of this.statechart.states) {
+      state.after.forEach((timer, cell) => {
+        cells[timer.index] = cell;
+        labels[timer.index] = `: ${state.name} after ${timer.key}`;
+      });
     }
+    this.#timerCells = cells;
     this.#timerLabels = labels;
-    this.#counts = statechart.states.map(() => 0);
+    this.#timersPerRow = Math.max(0, ...this.statechart.states.map((state) => state.after.length));
+    this.#timers = new Int32Array(INITIAL_CAPACITY * this.#timersPerRow).fill(NO_EVENT);
+    this.#counts = this.statechart.states.map(() => 0);
+    this.#timeoutKind = this.#scheduler.registerKind(new AgentTimeouts(this));
+    this.#messages = new AgentMessages(this.#scheduler, this.name);
   }
 
-  /** The id the next agent gets. */
+  /** The agents in the order of the rows. */
+  get agents(): readonly Agent<TContext>[] {
+    return this.#agents;
+  }
+
+  /** The id the next agent gets: ids count every agent created, removed ones included. */
   get nextId(): number {
-    return this.agents.length + 1;
+    return this.#created + 1;
   }
 
-  /** Adds an agent in the initial state and returns its index. */
+  /** Adds a row for an agent in the initial state and returns its place. */
   add(agent: Agent<TContext>): number {
-    const index = this.agents.length;
-    this.agents.push(agent);
-    if (index === this.#codes.length) this.#grow();
+    const index = this.#agents.length;
+    if (index === this.#ids.length) this.#grow();
+    this.#agents.push(agent);
+    this.#created++;
+    this.#ids[index] = agent.id;
     const code = this.statechart.initial.code;
     this.#codes[index] = code;
     this.#counts[code] = (this.#counts[code] ?? 0) + 1;
     return index;
   }
 
-  stateOf(index: number): StateNode<TContext> {
+  /**
+   * Removes the agent at `index`: cancels its timeouts and moves the last
+   * agent into its row, so the columns stay dense. Its messages still pending
+   * are discarded when they are delivered.
+   */
+  removeAt(index: number): void {
+    const agent = this.#agentAt(index);
+    this.cancelTimers(index);
+    const state = this.stateAt(index);
+    this.#counts[state.code] = (this.#counts[state.code] ?? 0) - 1;
+    this.#removedStates.set(agent, state);
+    const last = this.#agents.length - 1;
+    if (index !== last) this.#moveRow(last, index);
+    this.#agents.pop();
+    agentFriend.moveTo(agent, REMOVED);
+  }
+
+  /** Asks to remove an agent at the end of its step; returns false if it has asked already. */
+  leaveAfterStep(agent: Agent<TContext>): boolean {
+    if (this.#leaving.has(agent)) return false;
+    this.#leaving.add(agent);
+    return true;
+  }
+
+  /** Whether the agent asked to be removed during the step it has just ended; forgets the request. */
+  leavesAfterStep(agent: Agent<TContext>): boolean {
+    return this.#leaving.size > 0 && this.#leaving.delete(agent);
+  }
+
+  stateAt(index: number): StateNode<TContext> {
     const state = this.statechart.states[this.#codes[index] ?? -1];
-    if (state === undefined) throw new Error(`AgentStore "${this.name}": no agent with index ${String(index)}`);
+    if (state === undefined) throw new Error(`AgentStore "${this.name}": no agent at ${String(index)}`);
+    return state;
+  }
+
+  removedStateOf(agent: Agent<TContext>): StateNode<TContext> {
+    const state = this.#removedStates.get(agent);
+    if (state === undefined) throw new Error(`AgentStore "${this.name}": agent ${String(agent.id)} was not removed`);
     return state;
   }
 
@@ -92,9 +166,14 @@ export class AgentStore<TContext extends object> {
     return this.#counts[code] ?? 0;
   }
 
-  /** A copy of the state codes of all agents, in creation order. */
+  /** A copy of the ids, in the order of the rows. */
+  copyIds(): Float64Array {
+    return this.#ids.slice(0, this.#agents.length);
+  }
+
+  /** A copy of the state codes, in the order of the rows. */
   copyCodes(): Uint16Array {
-    return this.#codes.slice(0, this.agents.length);
+    return this.#codes.slice(0, this.#agents.length);
   }
 
   /** The stream a timer's delay function draws from. */
@@ -104,24 +183,88 @@ export class AgentStore<TContext extends object> {
     return stream;
   }
 
-  /** Label of a timer's events: "<population>: <state> after <key>". */
-  timerLabel(timer: Timer<TContext>): string {
-    return this.#timerLabels[timer.index] ?? this.name;
+  /** Sets a timeout of the agent at `index`, due `delay` from now (finite, checked). */
+  setTimer(index: number, timer: Timer<TContext>, delay: number): void {
+    const scheduler = this.#scheduler;
+    const slot = scheduler.add(scheduler.now + delay, DEFAULT_PRIORITY, this.#timeoutKind, index, timer.index);
+    this.#timers[this.#timerCell(index, timer.index)] = slot;
   }
 
-  /** Label of the events that deliver messages of a type: "<population>: message "<type>"". */
-  messageLabel(type: string): string {
-    let label = this.#messageLabels.get(type);
-    if (label === undefined) {
-      label = `${this.name}: message "${type}"`;
-      this.#messageLabels.set(type, label);
+  /** Cancels the pending timeouts of the agent at `index`. */
+  cancelTimers(index: number): void {
+    const start = index * this.#timersPerRow;
+    for (let cell = start; cell < start + this.#timersPerRow; cell++) {
+      const slot = this.#timers[cell] ?? NO_EVENT;
+      if (slot === NO_EVENT) continue;
+      this.#scheduler.cancel(slot);
+      this.#timers[cell] = NO_EVENT;
     }
-    return label;
+  }
+
+  /** Fires a timeout of the agent at `index`: the event has left the queue, and the agent takes its step. */
+  fireTimer(index: number, timerIndex: number): void {
+    this.#timers[this.#timerCell(index, timerIndex)] = NO_EVENT;
+    const timer = this.statechart.timers[timerIndex];
+    if (timer === undefined) throw new Error(`AgentStore "${this.name}": no timer ${String(timerIndex)}`);
+    agentFriend.fireTimer(this.#agentAt(index), timer);
+  }
+
+  /** "<population>#<agent>: <state> after <key>" (П-29). */
+  timerLabel(index: number, timerIndex: number): string {
+    return `${this.name}#${String(this.#ids[index])}${this.#timerLabels[timerIndex] ?? ''}`;
+  }
+
+  send(agent: Agent<TContext>, message: AgentEvent): void {
+    this.#messages.send(agent, message);
+  }
+
+  #timerCell(index: number, timerIndex: number): number {
+    return index * this.#timersPerRow + (this.#timerCells[timerIndex] ?? 0);
+  }
+
+  #agentAt(index: number): Agent<TContext> {
+    const agent = this.#agents[index];
+    if (agent === undefined) throw new Error(`AgentStore "${this.name}": no agent at ${String(index)}`);
+    return agent;
+  }
+
+  /** Moves the agent in row `from` to row `to`; its pending timeouts follow it. */
+  #moveRow(from: number, to: number): void {
+    const agent = this.#agentAt(from);
+    this.#agents[to] = agent;
+    this.#ids[to] = this.#ids[from] ?? 0;
+    this.#codes[to] = this.#codes[from] ?? 0;
+    const width = this.#timersPerRow;
+    for (let cell = 0; cell < width; cell++) {
+      const slot = this.#timers[from * width + cell] ?? NO_EVENT;
+      this.#timers[to * width + cell] = slot;
+      this.#timers[from * width + cell] = NO_EVENT;
+      if (slot !== NO_EVENT) this.#scheduler.retarget(slot, to);
+    }
+    agentFriend.moveTo(agent, to);
   }
 
   #grow(): void {
-    const codes = new Uint16Array(this.#codes.length * 2);
-    codes.set(this.#codes);
-    this.#codes = codes;
+    const capacity = this.#ids.length * 2;
+    this.#ids = grown(this.#ids, new Float64Array(capacity));
+    this.#codes = grown(this.#codes, new Uint16Array(capacity));
+    this.#timers = grown(this.#timers, new Int32Array(capacity * this.#timersPerRow).fill(NO_EVENT));
+  }
+}
+
+/** Timeouts of the agents of one population: `target` is the agent's row, `data` the timer's index. */
+class AgentTimeouts<TContext extends object> implements EventKind {
+  readonly #store: AgentStore<TContext>;
+
+  constructor(store: AgentStore<TContext>) {
+    this.#store = store;
+  }
+
+  fire(index: number, timerIndex: number): void {
+    this.#store.fireTimer(index, timerIndex);
+  }
+
+  label(index: number, timerIndex: number): string {
+    return this.#store.timerLabel(index, timerIndex);
   }
 }
