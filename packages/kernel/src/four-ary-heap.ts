@@ -54,10 +54,10 @@ export class FourAryHeap implements EventQueue {
     const lastIndex = --this.#size;
     if (index === lastIndex) return;
     // The last entry fills the hole and moves up or down to its place.
-    const time = this.#timeAt(lastIndex);
-    const last = this.#slotAt(lastIndex);
+    const time = this.#times[lastIndex] ?? Infinity;
+    const last = this.#slots[lastIndex] ?? NONE;
     const parent = (index - 1) >> 2;
-    if (index > 0 && this.#before(time, last, this.#timeAt(parent), this.#slotAt(parent))) {
+    if (index > 0 && this.#before(time, last, this.#times[parent] ?? Infinity, this.#slots[parent] ?? NONE)) {
       this.#siftUp(index, last, time);
     } else {
       this.#siftDown(index, last, time);
@@ -65,25 +65,39 @@ export class FourAryHeap implements EventQueue {
   }
 
   firstTime(): number {
-    return this.#size === 0 ? Infinity : this.#timeAt(0);
+    return this.#size === 0 ? Infinity : (this.#times[0] ?? Infinity);
   }
 
   /**
    * Removes the top "bottom-up": the hole left at the top sinks to a leaf
-   * along the earlier child at each level, then the last entry is put in the
-   * hole and sifted up. The last entry is a late event that belongs near the
-   * bottom anyway, so this saves the comparison with it at every level of
-   * the way down (Wegener, "Bottom-up heapsort", 1993).
+   * along the earliest child at each level, then the last entry is put in
+   * the hole and sifted up. The last entry is a late event that belongs near
+   * the bottom anyway, so this saves the comparison with it at every level
+   * of the way down (Wegener, "Bottom-up heapsort", 1993).
+   *
+   * The loops here and in the sifts read the arrays through local variables
+   * rather than small accessor methods: they run on every event, and the
+   * accessors cost a quarter of the speed on queues that fit in the cache.
    */
   removeFirst(): number {
     if (this.#size === 0) return NONE;
-    const first = this.#slotAt(0);
-    this.#positions[first] = NONE;
-    const lastIndex = --this.#size;
-    if (lastIndex > 0) {
-      const hole = this.#sinkHoleToLeaf(0);
-      this.#siftUp(hole, this.#slotAt(lastIndex), this.#timeAt(lastIndex));
+    const times = this.#times;
+    const slots = this.#slots;
+    const positions = this.#positions;
+    const first = slots[0] ?? NONE;
+    positions[first] = NONE;
+    const size = --this.#size;
+    if (size === 0) return first;
+    let hole = 0;
+    for (let child = this.#earliestChild(hole); child !== NONE; child = this.#earliestChild(hole)) {
+      const moved = slots[child] ?? NONE;
+      times[hole] = times[child] ?? Infinity;
+      slots[hole] = moved;
+      positions[moved] = hole;
+      hole = child;
     }
+    // The last entry, now outside the heap, goes into the hole at the leaf.
+    this.#siftUp(hole, slots[size] ?? NONE, times[size] ?? Infinity);
     return first;
   }
 
@@ -99,55 +113,58 @@ export class FourAryHeap implements EventQueue {
 
   /** Moves the hole at `index` up past every parent that fires after (slot, time), then puts the entry there. */
   #siftUp(index: number, slot: number, time: number): void {
+    const times = this.#times;
+    const slots = this.#slots;
+    const positions = this.#positions;
     let hole = index;
     while (hole > 0) {
       const parent = (hole - 1) >> 2;
-      const parentTime = this.#timeAt(parent);
-      // Most new events are later than their parent, and their times differ: decide by time alone first.
-      if (time > parentTime) break;
-      if (!this.#before(time, slot, parentTime, this.#slotAt(parent))) break;
-      this.#move(parent, hole);
+      const parentTime = times[parent] ?? Infinity;
+      const parentSlot = slots[parent] ?? NONE;
+      // Most new events are later than their parent: the time alone decides, without reading the records.
+      if (time > parentTime || !this.#before(time, slot, parentTime, parentSlot)) break;
+      times[hole] = parentTime;
+      slots[hole] = parentSlot;
+      positions[parentSlot] = hole;
       hole = parent;
     }
-    this.#place(hole, slot, time);
+    times[hole] = time;
+    slots[hole] = slot;
+    positions[slot] = hole;
   }
 
   /** Moves the hole at `index` down past every child that fires before (slot, time), then puts the entry there. */
   #siftDown(index: number, slot: number, time: number): void {
-    let hole = index;
-    for (;;) {
-      const child = this.#earliestChild(hole);
-      if (child === NONE || !this.#before(this.#timeAt(child), this.#slotAt(child), time, slot)) break;
-      this.#move(child, hole);
-      hole = child;
-    }
-    this.#place(hole, slot, time);
-  }
-
-  /** Moves the hole at `index` down to a leaf, pulling the earliest child up at each level; returns the leaf. */
-  #sinkHoleToLeaf(index: number): number {
+    const times = this.#times;
+    const slots = this.#slots;
+    const positions = this.#positions;
     let hole = index;
     for (let child = this.#earliestChild(hole); child !== NONE; child = this.#earliestChild(hole)) {
-      this.#move(child, hole);
+      const childTime = times[child] ?? Infinity;
+      const childSlot = slots[child] ?? NONE;
+      if (!this.#before(childTime, childSlot, time, slot)) break;
+      times[hole] = childTime;
+      slots[hole] = childSlot;
+      positions[childSlot] = hole;
       hole = child;
     }
-    return hole;
+    times[hole] = time;
+    slots[hole] = slot;
+    positions[slot] = hole;
   }
 
   /** Index of the child of `parent` that fires first; NONE for a leaf. */
   #earliestChild(parent: number): number {
     const first = ARITY * parent + 1;
-    if (first >= this.#size) return NONE;
-    const end = Math.min(first + ARITY, this.#size);
+    const size = this.#size;
+    if (first >= size) return NONE;
+    const times = this.#times;
+    const end = Math.min(first + ARITY, size);
     let earliest = first;
-    let earliestTime = this.#timeAt(first);
+    let earliestTime = times[first] ?? Infinity;
     for (let child = first + 1; child < end; child++) {
-      const time = this.#timeAt(child);
-      const earlier =
-        time === earliestTime
-          ? this.#before(time, this.#slotAt(child), earliestTime, this.#slotAt(earliest))
-          : time < earliestTime;
-      if (earlier) {
+      const time = times[child] ?? Infinity;
+      if (time < earliestTime || (time === earliestTime && this.#tieBefore(child, earliest))) {
         earliest = child;
         earliestTime = time;
       }
@@ -155,22 +172,10 @@ export class FourAryHeap implements EventQueue {
     return earliest;
   }
 
-  #move(from: number, to: number): void {
-    this.#place(to, this.#slotAt(from), this.#timeAt(from));
-  }
-
-  #place(index: number, slot: number, time: number): void {
-    this.#times[index] = time;
-    this.#slots[index] = slot;
-    this.#positions[slot] = index;
-  }
-
-  #timeAt(index: number): number {
-    return this.#times[index] ?? Infinity;
-  }
-
-  #slotAt(index: number): number {
-    return this.#slots[index] ?? NONE;
+  /** For two heap entries of equal time: true if the one at index `a` fires before the one at `b`. */
+  #tieBefore(a: number, b: number): boolean {
+    const time = this.#times[a] ?? Infinity;
+    return this.#before(time, this.#slots[a] ?? NONE, time, this.#slots[b] ?? NONE);
   }
 
   #growHeap(): void {
