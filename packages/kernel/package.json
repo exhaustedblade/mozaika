@@ -23,6 +23,6 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json && tsc -p bench/tsconfig.json",
     "test": "vitest run",
-    "bench": "tsc -p tsconfig.build.json && node bench/events.ts && node --expose-gc bench/agents.ts"
+    "bench": "tsc -p tsconfig.build.json && node bench/events.ts && node --expose-gc bench/agents.ts && node --expose-gc bench/moving-agents.ts"
   }
 }
