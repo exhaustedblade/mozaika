@@ -4,8 +4,10 @@
  * summary, below the kernel's.
  *
  * It measures the built packages (dist), as other packages run them. As in
- * the kernel benchmark, the threshold is deliberately low: a slow CI machine
- * must not fail the build, but a real regression must.
+ * the kernel benchmark, the threshold is deliberately low — about ten times
+ * below the slower runs in CI — so a slow machine must not fail the build,
+ * but a real regression must. The table also shows the entities per second
+ * of the blocks on processes before Ф0-4в, as measured in CI.
  *
  * Run: pnpm bench
  */
@@ -23,7 +25,10 @@ const UTILIZATION = 0.9;
  */
 const ARRIVALS = 256_000;
 const RUNS = 5;
-const MIN_EVENTS_PER_SECOND = 150_000;
+/** CI on the blocks on events: 4.0–7.8 million events per second, depending on the runner. */
+const MIN_EVENTS_PER_SECOND = 400_000;
+/** Entities per second of the blocks on processes before Ф0-4в, in CI: the median of 14 runs (21.10.2026). */
+const ENTITIES_PER_SECOND_BEFORE = 675_000;
 
 /** Builds M/M/1 with mean service time 1 and a source that stops after `arrivals`. */
 function mm1Model(arrivals: number): Simulation {
@@ -63,30 +68,43 @@ function measure(): Measurement {
 }
 
 const number = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 });
+const decimal = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 });
 const tableRow = (...cells: string[]): string => `| ${cells.join(' | ')} |`;
 
 const { events, milliseconds } = measure();
 const eventsPerSecond = (events / milliseconds) * 1000;
+const entitiesPerSecond = (ARRIVALS / milliseconds) * 1000;
 const tooSlow = eventsPerSecond < MIN_EVENTS_PER_SECOND;
 
 const report = [
   '',
   '### Скорость блоков',
   '',
-  tableRow('Сценарий', 'Событий', 'Время, мс', 'Событий в секунду', 'Сущностей в секунду'),
-  tableRow('---', '---:', '---:', '---:', '---:'),
+  tableRow(
+    'Сценарий',
+    'Событий',
+    'Время, мс',
+    'Событий в секунду',
+    'Сущностей в секунду',
+    'До Ф0-4в в CI, сущностей в секунду',
+    'Быстрее, раз',
+  ),
+  tableRow('---', '---:', '---:', '---:', '---:', '---:', '---:'),
   tableRow(
     'M/M/1 на блоках, ρ = 0,9 (Source → Service → Sink)',
     number.format(events),
     number.format(milliseconds),
     number.format(eventsPerSecond),
-    number.format((ARRIVALS / milliseconds) * 1000),
+    number.format(entitiesPerSecond),
+    number.format(ENTITIES_PER_SECOND_BEFORE),
+    decimal.format(entitiesPerSecond / ENTITIES_PER_SECOND_BEFORE),
   ),
   '',
   `${number.format(ARRIVALS)} приходов. Медиана из ${String(RUNS)} прогонов после разогрева. ` +
     `Порог: не меньше ${number.format(MIN_EVENTS_PER_SECOND)} событий в секунду.`,
   'С Ф0-4в на сущность приходится около 2,9 события вместо 3,9: у неё больше нет своего процесса, ' +
-    'поэтому та же модель даёт меньше событий, а скорость модели лучше видна в сущностях в секунду.',
+    'поэтому та же модель даёт меньше событий, а скорость модели лучше видна в сущностях в секунду. ' +
+    '«До Ф0-4в» — блоки на процессах, медиана 14 прогонов CI; раннеры разные, отношение — ориентир (DECISIONS, П-41).',
 ];
 if (tooSlow) report.push('', '**Ниже порога.**');
 console.log(report.join('\n'));

@@ -14,7 +14,14 @@
  *
  * It measures the built packages (dist), as other packages run them. As in
  * the other benchmarks, the speed threshold is about ten times below the
- * speed measured in CI, so that a slow machine passes but a real regression fails.
+ * slower runs in CI, so that a slow machine passes but a real regression
+ * fails. The memory ceiling is the goal of Ф0-4в: a third of what the blocks
+ * on processes took. Memory hardly depends on the machine.
+ *
+ * The table also shows the blocks on processes before Ф0-4в, as measured in
+ * CI, and how many times better the blocks on events are. GitHub's runners
+ * differ by up to two times on this scenario, so the ratio is only a guide;
+ * compare several runs (docs/DECISIONS.md, П-41).
  *
  * Run: pnpm bench
  */
@@ -37,8 +44,11 @@ const FILL_TIME = 8;
 /** Model time of each measured run: about 2–3 events per entity, 100 000 entities per unit. */
 const RUN_LENGTH = 1;
 const RUNS = 5;
-const MIN_TIME_UNITS_PER_SECOND = 0.3;
-const MAX_BYTES_PER_ENTITY = 2_000;
+/** CI on the blocks on events: 7–16 units per second, depending on the runner. */
+const MIN_TIME_UNITS_PER_SECOND = 0.7;
+const MAX_BYTES_PER_ENTITY = 220;
+/** The blocks on processes before Ф0-4в, in CI: the median of 5 runs (commits 7aac769–8a59f3a, 21.10.2026). */
+const BEFORE = { timeUnitsPerSecond: 3.26, bytesPerEntity: 663 };
 
 interface CrowdModel {
   readonly simulation: Simulation;
@@ -126,6 +136,10 @@ const report = [
   tableRow('Сущностей в Delay при замере памяти', number.format(measurement.inDelay)),
   tableRow('Память на сущность, байт', number.format(measurement.bytesPerEntity)),
   tableRow('Память всего, МБ', decimal.format(measurement.megabytes)),
+  tableRow('До Ф0-4в в CI: единиц времени в секунду', decimal.format(BEFORE.timeUnitsPerSecond)),
+  tableRow('Быстрее, чем до Ф0-4в в CI, раз', decimal.format(measurement.timeUnitsPerSecond / BEFORE.timeUnitsPerSecond)),
+  tableRow('До Ф0-4в в CI: байт на сущность', number.format(BEFORE.bytesPerEntity)),
+  tableRow('Меньше памяти, чем до Ф0-4в, раз', decimal.format(BEFORE.bytesPerEntity / measurement.bytesPerEntity)),
   '',
   'Source (пуассоновский поток, 100 000 в единицу времени) → Delay (экспоненциальная задержка, среднее 1) → Sink: ' +
     'в Delay в среднем 100 000 сущностей, за единицу времени 100 000 входят и 100 000 выходят. ' +
@@ -134,6 +148,9 @@ const report = [
     'вместе с её ожидающим событием.',
   `Порог: не меньше ${decimal.format(MIN_TIME_UNITS_PER_SECOND)} единицы времени в секунду; ` +
     `потолок памяти: ${number.format(MAX_BYTES_PER_ENTITY)} байт на сущность.`,
+  '«До Ф0-4в» — блоки на процессах, медиана 5 прогонов CI (коммиты 7aac769–8a59f3a). Раннеры GitHub разные: ' +
+    'на этом сценарии один и тот же код работает на них с разницей до двух раз, поэтому отношение — ориентир; ' +
+    'сравнение по нескольким прогонам — в DECISIONS, П-41.',
 ];
 if (problems.length > 0) report.push('', `**${problems.join('; ')}.**`);
 console.log(report.join('\n'));
