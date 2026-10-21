@@ -529,7 +529,7 @@ describe('agents: errors', () => {
     expect(() => agents.add()).toThrow(simulationError('AGENT_FAILED', { cause: simulationError('NEGATIVE_DELAY') }));
   });
 
-  it('labels the events of agents with the population and the transition', () => {
+  it('labels the events of agents with the agent and the transition', () => {
     const trace: string[] = [];
     const sim = new Simulation({ trace: (event) => trace.push(describeEvent(event)) });
     const chart = defineStatechart({ initial: 'a', states: { a: { after: { 1: 'b' } }, b: { on: { go: 'a' } } } });
@@ -537,6 +537,20 @@ describe('agents: errors', () => {
     sim.run();
     agent.send({ type: 'go' });
     sim.run(1);
-    expect(trace).toEqual(['1 0 #0 customers: a after 1', '1 0 #1 customers: message "go"']);
+    expect(trace).toEqual(['1 0 #0 customers#1: a after 1', '1 0 #1 customers#1: message "go"']);
+  });
+
+  it('keeps naming an agent in labels after it has moved in the population', () => {
+    const trace: string[] = [];
+    const sim = new Simulation({ trace: (event) => trace.push(describeEvent(event)) });
+    const chart = defineStatechart({ initial: 'a', states: { a: { after: { 2: 'b' } }, b: {} } });
+    const customers = new AgentPopulation(sim, { name: 'customers', statechart: chart });
+    const first = customers.add();
+    customers.add();
+    customers.add();
+    // Agent 3 takes the place of agent 1.
+    customers.remove(first);
+    sim.run();
+    expect(trace).toEqual(['2 0 #1 customers#2: a after 2', '2 0 #2 customers#3: a after 2']);
   });
 });

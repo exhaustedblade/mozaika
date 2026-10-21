@@ -23,6 +23,8 @@ interface Scenario {
   readonly title: string;
   /** Builds a model that fires exactly `events` events. */
   readonly build: (events: number) => Simulation;
+  /** Events per second of the kernel of objects before Ф0-4б, in CI (commit 47903fe, 21.10.2026). */
+  readonly before: number;
 }
 
 interface Measurement {
@@ -65,12 +67,17 @@ function processModel(events: number): Simulation {
 }
 
 const SCENARIOS: readonly Scenario[] = [
-  { title: 'Очередь событий (hold-модель, 1000 событий в очереди)', build: (events) => holdModel(events, PENDING) },
+  {
+    title: 'Очередь событий (hold-модель, 1000 событий в очереди)',
+    build: (events) => holdModel(events, PENDING),
+    before: 3_978_853,
+  },
   {
     title: 'Большая очередь событий (hold-модель, 100 000 событий в очереди)',
     build: (events) => holdModel(events, LARGE_PENDING),
+    before: 1_499_359,
   },
-  { title: 'Процессы (1000 процессов, yield timeout)', build: processModel },
+  { title: 'Процессы (1000 процессов, yield timeout)', build: processModel, before: 3_303_698 },
 ];
 
 function median(values: readonly number[]): number {
@@ -95,6 +102,7 @@ function measure(scenario: Scenario): Measurement {
 }
 
 const number = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 });
+const decimal = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 });
 const tableRow = (...cells: string[]): string => `| ${cells.join(' | ')} |`;
 
 const measurements = SCENARIOS.map(measure);
@@ -105,14 +113,24 @@ const tooSlow = measurements
 const report = [
   '### Скорость ядра',
   '',
-  tableRow('Сценарий', 'Событий', 'Время, мс', 'Событий в секунду'),
-  tableRow('---', '---:', '---:', '---:'),
+  tableRow('Сценарий', 'Событий', 'Время, мс', 'Событий в секунду', 'До Ф0-4б в CI', 'Быстрее, раз'),
+  tableRow('---', '---:', '---:', '---:', '---:', '---:'),
   ...measurements.map(({ scenario, milliseconds, eventsPerSecond }) =>
-    tableRow(scenario.title, number.format(EVENTS), number.format(milliseconds), number.format(eventsPerSecond)),
+    tableRow(
+      scenario.title,
+      number.format(EVENTS),
+      number.format(milliseconds),
+      number.format(eventsPerSecond),
+      number.format(scenario.before),
+      decimal.format(eventsPerSecond / scenario.before),
+    ),
   ),
   '',
   `Медиана из ${String(RUNS)} прогонов после разогрева. ` +
     `Порог: не меньше ${number.format(MIN_EVENTS_PER_SECOND)} событий в секунду в каждом сценарии.`,
+  '«До Ф0-4б» — ядро из объектов в одном прогоне CI (коммит 47903fe). Раннеры GitHub разные: ' +
+    'один и тот же код на них работает с разницей до 1,6 раза, поэтому отношение — ориентир; ' +
+    'сравнение по нескольким прогонам — в DECISIONS, П-36.',
 ];
 if (tooSlow.length > 0) report.push('', `**Ниже порога:** ${tooSlow.join('; ')}.`);
 console.log(report.join('\n'));

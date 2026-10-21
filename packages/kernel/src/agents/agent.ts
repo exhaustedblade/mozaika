@@ -1,13 +1,14 @@
 /**
  * Agents: objects with fields that live by a statechart (docs/AGENTS.md).
  *
- * An agent is not a process. Its timeouts and messages are plain kernel
- * events, and a timeout is cancelled when the agent leaves its state, so a
- * hundred thousand agents cost a hundred thousand objects and their pending
- * events, not a hundred thousand generators.
+ * An agent is not a process. Its timeouts and messages are events of kinds
+ * its population registers with the kernel (store.ts, messages.ts). Such an
+ * event carries numbers — the agent's place in the population's columns and
+ * the timer, or a row of the message table — rather than an object and a
+ * closure, so a hundred thousand agents cost their objects and fields, a few
+ * columns of numbers and their pending events.
  */
 import { messageOf, SimulationError } from '../errors.js';
-import type { EventHandle } from '../event-queue.js';
 import type { AgentAction, AgentArgs, AgentEvent } from './definition.js';
 import type { AgentPopulation } from './population.js';
 import { requireAgentDelay, type StateNode, type Timer, type Transition } from './compile.js';
@@ -25,42 +26,87 @@ const CHECK_EVENT: AgentEvent = Object.freeze({ type: 'agent.check' });
  */
 const MAX_EVENTLESS_TRANSITIONS = 1000;
 
+/** The place of an agent that has been removed from its population. */
+export const REMOVED = -1;
+
+/**
+ * What an agent's population does with it beyond the public API. These need
+ * the agent's private fields, so the static block of Agent defines them: a
+ * static block sees the private fields of every instance, which makes it the
+ * standard way to give one module "friend" access to a class (ES2022). The
+ * package does not export them.
+ */
+export interface AgentFriend {
+  /** The agent takes the step of one of its timers that has fired. */
+  fireTimer<TContext extends object>(agent: Agent<TContext>, timer: Timer<TContext>): void;
+  /** The agent takes the step of a message delivered to it, or discards it. */
+  receive<TContext extends object>(agent: Agent<TContext>, message: AgentEvent): void;
+  /**
+   * Removes the agent from its population now, or at the end of its step if
+   * it is taking one; returns false if it was already removed or leaving.
+   */
+  remove<TContext extends object>(agent: Agent<TContext>): boolean;
+  /** Sets the agent's place in the columns: another agent's removal moved it, or it was removed (REMOVED). */
+  moveTo<TContext extends object>(agent: Agent<TContext>, index: number): void;
+}
+
+/**
+ * See AgentFriend. Set once, by the static block of Agent, when this module
+ * is evaluated, before any module that imports it uses it; ES modules give
+ * importers a binding they cannot assign.
+ */
+export let agentFriend: AgentFriend;
+
 export class Agent<TContext extends object = object> {
-  /** Number in the population: 1, 2, 3… in the order of creation. */
+  /** Number in the population: 1, 2, 3… in the order of creation, never reused. */
   readonly id: number;
   /** Model time at which the agent was created. */
   readonly createdAt: number;
-  readonly population: AgentPopulation<TContext>;
   /** The agent's fields; actions change them in place. */
   readonly context: TContext;
   readonly #store: AgentStore<TContext>;
-  /** Position in the population's arrays. */
-  readonly #index: number;
   /**
-   * Pending timeouts of the current state. Most states have at most one, so
-   * the first has a field of its own and only the rest go into an array: one
-   * object and one memory access less per event, for each of many agents.
+   * Place in the population's columns, or REMOVED. It changes when the
+   * population removes another agent and moves this one into its place, so
+   * every access to the columns reads it anew.
    */
-  #timer: EventHandle | undefined;
-  #moreTimers: EventHandle[] | undefined;
-  /** True while the agent takes a step: its own check() then waits for the end of the step. */
+  #index: number;
+  /** True while the agent takes a step: its own check() then waits for the end of the step, and so does its removal. */
   #busy = false;
+
+  static {
+    agentFriend = {
+      fireTimer: (agent, timer) => {
+        agent.#react(timer.event, timer.transitions);
+      },
+      receive: (agent, message) => {
+        agent.#receive(message);
+      },
+      remove: (agent) => agent.#remove(),
+      moveTo: (agent, index) => {
+        agent.#index = index;
+      },
+    };
+  }
 
   /**
    * Use population.add(). The agent joins the population and enters its
    * initial state at once, inside the constructor, without an event.
    */
-  constructor(store: AgentStore<TContext>, population: AgentPopulation<TContext>, context: TContext) {
+  constructor(store: AgentStore<TContext>, context: TContext) {
     this.#store = store;
-    this.population = population;
     this.context = context;
+    this.id = store.nextId;
     this.createdAt = store.simulation.now;
     this.#index = store.add(this);
-    this.id = this.#index + 1;
     this.#start();
   }
 
-  /** Name of the current state. */
+  get population(): AgentPopulation<TContext> {
+    return this.#store.population;
+  }
+
+  /** Name of the current state; for a removed agent, of the state it was removed in. */
   get state(): string {
     return this.#currentState().name;
   }
@@ -70,20 +116,19 @@ export class Agent<TContext extends object = object> {
     return this.#currentState().final;
   }
 
+  /** True once the agent has been removed from its population: it no longer reacts to anything. */
+  get removed(): boolean {
+    return this.#index === REMOVED;
+  }
+
   /**
    * Sends the agent a message. It is delivered as an event at the current
    * time, after the events already due now (П-8); a message that finds no
-   * enabled transition is discarded and counted in population.discardedMessages.
+   * enabled transition, or a removed agent, is discarded and counted in
+   * population.discardedMessages.
    */
   send(event: AgentEvent): void {
-    const message = requireMessage(event);
-    this.#store.simulation.schedule(
-      0,
-      () => {
-        this.#receive(message);
-      },
-      { label: this.#store.messageLabel(message.type) },
-    );
+    this.#store.send(this, requireMessage(event));
   }
 
   /**
@@ -93,7 +138,7 @@ export class Agent<TContext extends object = object> {
    * is taking a step of its own: the step checks the conditions at its end.
    */
   check(): void {
-    if (this.#busy || this.done) return;
+    if (this.#busy || this.removed || this.done) return;
     this.#react(CHECK_EVENT, undefined);
   }
 
@@ -105,17 +150,17 @@ export class Agent<TContext extends object = object> {
     } catch (error) {
       throw this.#failure(error);
     } finally {
-      this.#busy = false;
+      this.#endStep();
     }
   }
 
   #receive(message: AgentEvent): void {
+    if (this.removed) {
+      this.#store.discardedMessages++;
+      return;
+    }
     const transitions = this.#currentState().on.get(message.type);
     if (!this.#react(message, transitions)) this.#store.discardedMessages++;
-  }
-
-  #fire(timer: Timer<TContext>): void {
-    this.#react(timer.event, timer.transitions);
   }
 
   /**
@@ -133,7 +178,7 @@ export class Agent<TContext extends object = object> {
     } catch (error) {
       throw this.#failure(error);
     } finally {
-      this.#busy = false;
+      this.#endStep();
     }
   }
 
@@ -141,6 +186,19 @@ export class Agent<TContext extends object = object> {
     this.#busy = true;
     const now = this.#store.simulation.now;
     return { agent: this, context: this.context, event, now, random: this.#store.random };
+  }
+
+  /** Ends a step; an agent that asked to be removed during it leaves now. */
+  #endStep(): void {
+    this.#busy = false;
+    if (this.#store.leavesAfterStep(this)) this.#store.removeAt(this.#index);
+  }
+
+  #remove(): boolean {
+    if (this.removed) return false;
+    if (this.#busy) return this.#store.leaveAfterStep(this);
+    this.#store.removeAt(this.#index);
+    return true;
   }
 
   /**
@@ -188,26 +246,13 @@ export class Agent<TContext extends object = object> {
 
   /** The timers of the state are cancelled, then its exit actions run. */
   #exit(state: StateNode<TContext>, args: AgentArgs<TContext>): void {
-    this.#cancelTimers();
+    this.#store.cancelTimers(this.#index);
     runActions(state.exit, args);
   }
 
   #setTimer(timer: Timer<TContext>, args: AgentArgs<TContext>): void {
     const delay = this.#delayOf(timer, args);
-    if (delay === Infinity) return;
-    const handle = this.#store.simulation.schedule(
-      delay,
-      () => {
-        this.#fire(timer);
-      },
-      { label: this.#store.timerLabel(timer) },
-    );
-    if (this.#timer === undefined) {
-      this.#timer = handle;
-    } else {
-      this.#moreTimers ??= [];
-      this.#moreTimers.push(handle);
-    }
+    if (delay !== Infinity) this.#store.setTimer(this.#index, timer, delay);
   }
 
   #delayOf(timer: Timer<TContext>, args: AgentArgs<TContext>): number {
@@ -218,29 +263,16 @@ export class Agent<TContext extends object = object> {
     return requireAgentDelay(value, `delay "${timer.key}"`);
   }
 
-  #cancelTimers(): void {
-    this.#timer?.cancel();
-    this.#timer = undefined;
-    const more = this.#moreTimers;
-    if (more === undefined || more.length === 0) return;
-    for (const timer of more) timer.cancel();
-    more.length = 0;
-  }
-
   #currentState(): StateNode<TContext> {
-    return this.#store.stateOf(this.#index);
-  }
-
-  /** "population#id", for error messages. */
-  #name(): string {
-    return `${this.#store.name}#${String(this.id)}`;
+    return this.removed ? this.#store.removedStateOf(this) : this.#store.stateAt(this.#index);
   }
 
   #failure(error: unknown): SimulationError {
+    const name = `${this.#store.name}#${String(this.id)}`;
     const time = String(this.#store.simulation.now);
     return new SimulationError(
       'AGENT_FAILED',
-      `Agent "${this.#name()}" failed at time ${time} in state "${this.state}": ${messageOf(error)}`,
+      `Agent "${name}" failed at time ${time} in state "${this.state}": ${messageOf(error)}`,
       { cause: error },
     );
   }

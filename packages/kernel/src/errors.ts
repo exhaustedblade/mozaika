@@ -105,3 +105,19 @@ export function requireFunction<T>(value: T, what: string): T {
   }
   return value;
 }
+
+/**
+ * The error of an event that failed: what it threw, wrapped as EVENT_FAILED
+ * with the event's name and time. A failed process or agent has already said
+ * which one failed and when (PROCESS_FAILED, AGENT_FAILED), so such an error
+ * passes through as it is.
+ */
+export function eventFailure(label: string | undefined, time: number, error: unknown): SimulationError {
+  if (error instanceof SimulationError && (error.code === 'PROCESS_FAILED' || error.code === 'AGENT_FAILED')) {
+    return error;
+  }
+  const name = label === undefined ? 'Event' : `Event "${label}"`;
+  return new SimulationError('EVENT_FAILED', `${name} failed at time ${String(time)}: ${messageOf(error)}`, {
+    cause: error,
+  });
+}

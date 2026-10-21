@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { type ProcessBody, timeout } from '../process.js';
 import { Simulation } from '../simulation.js';
 import { describeEvent } from '../test-helpers.js';
+import { fingerprint } from '../test-support/index.js';
 import { AgentPopulation } from './population.js';
 import { defineStatechart, rate } from './statechart.js';
 
@@ -11,6 +12,8 @@ interface TownRun {
   readonly trace: readonly string[];
   /** Times at which people fell ill. */
   readonly infections: readonly number[];
+  /** People who died and were replaced by newborns. */
+  readonly deaths: number;
 }
 
 /**
@@ -20,11 +23,12 @@ interface TownRun {
  * affects the order of events: rates, named random delays, messages between
  * agents, conditions, explicit checks and a kernel process alongside.
  */
-function runTown(seed: number, { withVisitors = false } = {}): TownRun {
+function runTown(seed: number, { withVisitors = false, withDeaths = false } = {}): TownRun {
   const trace: string[] = [];
   const infections: number[] = [];
   const sim = new Simulation({ seed, trace: (event) => trace.push(describeEvent(event)) });
   let alarm = false;
+  let deaths = 0;
   const person = defineStatechart(
     {
       initial: 'healthy',
@@ -44,14 +48,23 @@ function runTown(seed: number, { withVisitors = false } = {}): TownRun {
               other.send({ type: 'cough' });
             }
           },
-          after: { recovery: 'immune' },
+          after: withDeaths ? { recovery: 'immune', fatal: 'dead' } : { recovery: 'immune' },
           always: { guard: () => alarm, target: 'isolated' },
+        },
+        // With deaths: the dead leave the population and a newborn takes their place.
+        dead: {
+          type: 'final',
+          entry: ({ agent }) => {
+            deaths++;
+            agent.population.remove(agent);
+            agent.population.add();
+          },
         },
         isolated: { after: { recovery: 'immune' } },
         immune: { after: { 30: 'healthy' } },
       },
     },
-    { delays: { exposure: rate(0.01), recovery: ({ random }) => random.uniform(5, 10) } },
+    { delays: { exposure: rate(0.01), recovery: ({ random }) => random.uniform(5, 10), fatal: rate(0.05) } },
   );
   const people = new AgentPopulation(sim, { name: 'people', statechart: person });
   for (let i = 0; i < 200; i++) people.add();
@@ -75,7 +88,7 @@ function runTown(seed: number, { withVisitors = false } = {}): TownRun {
   }
   sim.process(clinic(), { name: 'clinic' });
   sim.run(100);
-  return { trace, infections };
+  return { trace, infections, deaths };
 }
 
 describe('agents: repeatability by seed', () => {
@@ -89,6 +102,25 @@ describe('agents: repeatability by seed', () => {
 
   it('gives a different trace for a different seed', () => {
     expect(runTown(2027).trace).not.toEqual(runTown(2026).trace);
+  });
+
+  it('fires the same events with the same numbers as the kernel of Ф0-4', () => {
+    // Recorded with the kernel of commit 47903fe, before the event queue moved
+    // to typed arrays (Ф0-4б). Labels of agent events have named the agent
+    // since then (П-29), so the number is taken out of them before comparing.
+    const { trace } = runTown(2026, { withVisitors: true });
+    const withoutAgents = trace.map((line) => line.replace(/ (people|visitors)#\d+: /, ' $1: '));
+    expect({ events: trace.length, fingerprint: fingerprint(withoutAgents) }).toEqual({
+      events: 2631,
+      fingerprint: '7539411b',
+    });
+  });
+
+  it('gives an identical trace for the same seed when agents are removed and added', () => {
+    const first = runTown(2026, { withDeaths: true });
+    const second = runTown(2026, { withDeaths: true });
+    expect(first.deaths).toBeGreaterThan(10);
+    expect(second.trace).toEqual(first.trace);
   });
 
   it('keeps what happens to one population when another population is added', () => {

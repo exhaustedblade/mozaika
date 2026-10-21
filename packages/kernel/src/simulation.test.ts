@@ -173,6 +173,116 @@ describe('Simulation: running', () => {
   });
 });
 
+describe('Simulation: cancelling events', () => {
+  it('cancels a pending event once and then reports it as no longer pending', () => {
+    const sim = new Simulation();
+    const handle = sim.schedule(1, () => undefined);
+    expect(handle.pending).toBe(true);
+    expect(handle.cancel()).toBe(true);
+    expect(handle.cancel()).toBe(false);
+    expect(handle.pending).toBe(false);
+    expect(sim.pendingEvents).toBe(0);
+    expect(sim.nextEventTime()).toBe(Infinity);
+  });
+
+  it('does not let an old handle cancel the event that took over its place in the queue', () => {
+    const sim = new Simulation();
+    const fired: string[] = [];
+    const cancelled = sim.schedule(1, () => fired.push('cancelled'));
+    cancelled.cancel();
+    // The next event takes the place the cancelled one has just freed.
+    const fresh = sim.schedule(2, () => fired.push('fresh'));
+    expect(cancelled.cancel()).toBe(false);
+    expect(cancelled.pending).toBe(false);
+    expect(fresh.pending).toBe(true);
+    sim.run();
+    expect(fired).toEqual(['fresh']);
+  });
+
+  it('does not let the handle of a fired event cancel a later one', () => {
+    const sim = new Simulation();
+    const fired: string[] = [];
+    const first = sim.schedule(1, () => fired.push('first'));
+    sim.run();
+    const later = sim.schedule(1, () => fired.push('later'));
+    expect(first.pending).toBe(false);
+    expect(first.cancel()).toBe(false);
+    expect(later.pending).toBe(true);
+    sim.run();
+    expect(fired).toEqual(['first', 'later']);
+  });
+
+  it('cannot cancel an event while it fires', () => {
+    const sim = new Simulation();
+    let result: boolean | undefined;
+    const handle = sim.schedule(1, () => {
+      result = handle.cancel();
+    });
+    sim.run();
+    expect(result).toBe(false);
+  });
+
+  it('keeps describing an event after it has fired or been cancelled', () => {
+    const sim = new Simulation();
+    const fired = sim.schedule(2, () => undefined, { label: 'fired', priority: -1 });
+    const cancelled = sim.schedule(3, () => undefined, { label: 'cancelled' });
+    cancelled.cancel();
+    sim.run();
+    sim.schedule(1, () => undefined);
+    sim.schedule(1, () => undefined);
+    expect(fired).toMatchObject({ time: 2, priority: -1, seq: 0, label: 'fired', pending: false });
+    expect(cancelled).toMatchObject({ time: 3, priority: 0, seq: 1, label: 'cancelled', pending: false });
+  });
+
+  it('cancels events of the same moment from inside an event, and later ones too', () => {
+    const sim = new Simulation();
+    const fired: string[] = [];
+    const sameMoment = sim.schedule(1, () => fired.push('same moment'));
+    const later = sim.schedule(5, () => fired.push('later'));
+    sim.scheduleAt(1, () => fired.push('kept'));
+    sim.schedule(1, () => {
+      fired.push('canceller');
+      sameMoment.cancel();
+      later.cancel();
+    }, { priority: -1 });
+    sim.run();
+    expect(fired).toEqual(['canceller', 'kept']);
+    expect(sim.eventsProcessed).toBe(2);
+  });
+
+  it('fires only the events left when most scheduled ones are cancelled', () => {
+    const sim = new Simulation({ seed: 4 });
+    const delays = sim.random.stream('delays');
+    const kept = new Set<number>();
+    const fired: number[] = [];
+    let nextTag = 0;
+    // Each event schedules ten more and cancels all but a random one, like an agent leaving a state with many timers.
+    const tick = (tag: number): void => {
+      fired.push(tag);
+      if (fired.length >= 2_000) return;
+      const handles = Array.from({ length: 10 }, () => {
+        const next = nextTag++;
+        const handle = sim.schedule(delays.exponential(1), () => {
+          tick(next);
+        });
+        return { tag: next, handle };
+      });
+      const keep = handles[Math.floor(delays.uniform(0, 10))];
+      for (const { tag, handle } of handles) {
+        if (tag === keep?.tag) kept.add(tag);
+        else handle.cancel();
+      }
+      expect(sim.pendingEvents).toBe(1);
+    };
+    sim.schedule(0, () => {
+      tick(-1);
+    });
+    sim.run();
+    expect(fired).toHaveLength(2_000);
+    expect(fired.slice(1).every((tag) => kept.has(tag))).toBe(true);
+  });
+});
+
 describe('Simulation: random numbers', () => {
   it('seeds its random stream from the options', () => {
     const fromSeed = new Simulation({ seed: 77 });

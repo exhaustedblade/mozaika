@@ -3,7 +3,7 @@
  */
 import { describeValue, messageOf, SimulationError } from '../errors.js';
 import type { Simulation } from '../simulation.js';
-import { Agent } from './agent.js';
+import { Agent, agentFriend } from './agent.js';
 import { Statechart } from './statechart.js';
 import { AgentStore } from './store.js';
 
@@ -23,8 +23,9 @@ const populationNames = new WeakMap<Simulation, Set<string>>();
 
 /**
  * The agents of one type. They are numbered 1, 2, 3… in the order of
- * creation, and their state codes are kept in a dense array in that order,
- * so a snapshot of a large population is one typed array (stateCodes()).
+ * creation. Their ids and state codes are kept in dense columns, in the order
+ * of creation until an agent is removed: the last agent then takes its place.
+ * So a snapshot of a large population is a few typed arrays (ids(), stateCodes()).
  */
 export class AgentPopulation<TContext extends object = object> {
   readonly simulation: Simulation;
@@ -43,17 +44,20 @@ export class AgentPopulation<TContext extends object = object> {
       );
     }
     this.statechart = options.statechart;
-    this.#store = new AgentStore(simulation, this.name, this.statechart);
-    // Last, so that a population refused for a bad option does not keep its name.
+    // After the checks, so that a population refused for a bad option does not keep its name.
     claimPopulationName(simulation, this.name);
+    this.#store = new AgentStore(this);
   }
 
-  /** Number of agents created so far. */
+  /** Number of agents in the population now. */
   get size(): number {
     return this.#store.agents.length;
   }
 
-  /** The agents in the order of creation; agent i has id i + 1. */
+  /**
+   * The agents in the order of the columns: the order of creation until an
+   * agent is removed, when the last agent takes its place.
+   */
   get agents(): readonly Agent<TContext>[] {
     return this.#store.agents;
   }
@@ -71,7 +75,32 @@ export class AgentPopulation<TContext extends object = object> {
   add(fields?: Partial<TContext>): Agent<TContext> {
     const context = this.#createContext();
     if (fields !== undefined) Object.assign(context, requireFields(fields, this.name));
-    return new Agent(this.#store, this, context);
+    return new Agent(this.#store, context);
+  }
+
+  /**
+   * Removes an agent (П-30): its timeouts are cancelled, messages still on
+   * their way to it are discarded and counted in discardedMessages, and the
+   * last agent takes its place in the columns. An agent that removes itself
+   * from its own action leaves at the end of its step. A removed agent keeps
+   * its id, fields and last state, but no longer reacts to anything.
+   * Returns false if the agent has already been removed.
+   */
+  remove(agent: Agent<TContext>): boolean {
+    if (!(agent instanceof Agent)) {
+      throw new SimulationError(
+        'INVALID_ARGUMENT',
+        `AgentPopulation "${this.name}": remove() expects one of its agents, got ${describeValue(agent)}`,
+      );
+    }
+    if (agent.population !== this) {
+      const other = agent.population.name;
+      throw new SimulationError(
+        'INVALID_ARGUMENT',
+        `AgentPopulation "${this.name}" cannot remove agent ${other}#${String(agent.id)} of population "${other}"`,
+      );
+    }
+    return agentFriend.remove(agent);
   }
 
   /** Number of agents in the state now. */
@@ -86,21 +115,36 @@ export class AgentPopulation<TContext extends object = object> {
     return this.#store.count(node.code);
   }
 
+  /** The id of every agent, in the order of the columns: a copy, so it can be handed to a viewer as is. */
+  ids(): Float64Array {
+    return this.#store.copyIds();
+  }
+
   /**
-   * The state code of every agent, in the order of creation: a copy, so it
-   * can be handed to a viewer as is. Code k is statechart.stateNames[k].
+   * The state code of every agent in one region of the statechart, in the
+   * order of the columns: a copy, so it can be handed to a viewer as is. Code k
+   * is statechart.stateNames[k]. A statechart has one region for now
+   * (statechart.regionCount); parallel states will add a column per region.
    */
-  stateCodes(): Uint16Array {
+  stateCodes(region = 0): Uint16Array {
+    if (!Number.isInteger(region) || region < 0 || region >= this.statechart.regionCount) {
+      throw new SimulationError(
+        'INVALID_ARGUMENT',
+        `AgentPopulation "${this.name}" has no region ${String(region)}; ` +
+          `its statechart has ${String(this.statechart.regionCount)}, numbered from 0`,
+      );
+    }
     return this.#store.copyCodes();
   }
 
   /**
-   * Checks the conditions of every agent, in the order of creation (Agent.check).
+   * Checks the conditions of every agent, in the order of the columns (Agent.check).
    * Call it after changing data that many agents' conditions read.
    */
   check(): void {
-    // Agents created during the loop are checked too; they were checked at creation, so it does no harm.
-    for (const agent of this.#store.agents) agent.check();
+    // A copy: the checks may add and remove agents. Agents added meanwhile were
+    // checked when they were created; removed ones are skipped by their own check().
+    for (const agent of [...this.#store.agents]) agent.check();
   }
 
   #createContext(): TContext {

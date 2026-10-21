@@ -4,6 +4,7 @@ import { type ProcessBody, timeout } from './process.js';
 import { Random } from './random.js';
 import { Simulation, type SimulationOptions } from './simulation.js';
 import { describeEvent } from './test-helpers.js';
+import { fingerprint } from './test-support/index.js';
 
 interface ShopRun {
   /** Every fired event: time, priority, seq and label. */
@@ -72,6 +73,16 @@ describe('repeatability by seed', () => {
 
   it('gives a different trace for a different seed', () => {
     expect(runShop({ seed: 2027 }).trace).not.toEqual(runShop({ seed: 2026 }).trace);
+  });
+
+  it('fires the same events with the same numbers as the kernel of Ф0-4', () => {
+    // Recorded with the kernel of commit 47903fe, before the event queue moved
+    // to typed arrays (Ф0-4б): times, priorities, numbers and labels all match.
+    const { trace } = runShop({ seed: 2026 });
+    expect({ events: trace.length, fingerprint: fingerprint(trace) }).toEqual({
+      events: 1097,
+      fingerprint: '18f304dd',
+    });
   });
 
   it('keeps arrivals unchanged when another part of the model draws random numbers', () => {
