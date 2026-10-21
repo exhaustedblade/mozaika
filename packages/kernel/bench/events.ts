@@ -13,6 +13,8 @@ import { type ProcessBody, Simulation, timeout } from '@mozaika/kernel';
 const EVENTS = 1_000_000;
 /** Events waiting in the queue at any moment: the size of the heap. */
 const PENDING = 1_000;
+/** A queue as large as a population of 100 000 agents keeps it: one pending timeout per agent. */
+const LARGE_PENDING = 100_000;
 const RUNS = 5;
 const MIN_EVENTS_PER_SECOND = 250_000;
 
@@ -31,19 +33,19 @@ interface Measurement {
 
 /**
  * The classic "hold" benchmark for event queues: each event schedules the next
- * one with a random delay, so the queue keeps a constant size.
+ * one with a random delay, so the queue keeps a constant size, `pending`.
  */
-function holdModel(events: number): Simulation {
+function holdModel(events: number, pending: number): Simulation {
   const sim = new Simulation({ seed: 1 });
   const delays = sim.random.stream('delays');
-  let left = events - PENDING;
+  let left = events - pending;
   const hold = (): void => {
     if (left > 0) {
       left--;
       sim.schedule(delays.exponential(1), hold);
     }
   };
-  for (let i = 0; i < PENDING; i++) sim.schedule(delays.exponential(1), hold);
+  for (let i = 0; i < pending; i++) sim.schedule(delays.exponential(1), hold);
   return sim;
 }
 
@@ -63,7 +65,11 @@ function processModel(events: number): Simulation {
 }
 
 const SCENARIOS: readonly Scenario[] = [
-  { title: 'Очередь событий (hold-модель, 1000 событий в очереди)', build: holdModel },
+  { title: 'Очередь событий (hold-модель, 1000 событий в очереди)', build: (events) => holdModel(events, PENDING) },
+  {
+    title: 'Большая очередь событий (hold-модель, 100 000 событий в очереди)',
+    build: (events) => holdModel(events, LARGE_PENDING),
+  },
   { title: 'Процессы (1000 процессов, yield timeout)', build: processModel },
 ];
 
