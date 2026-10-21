@@ -41,7 +41,7 @@
 
 | Часть | Компонент | Лицензия |
 |---|---|---|
-| 3D-сцена | Babylon.js или three.js (WebGPU, PBR, glTF) | Apache-2.0 / MIT |
+| 3D-сцена | Babylon.js — выбран по замеру в Ф0-6б (П-48); three.js сравнивался и убран | Apache-2.0 (проверено 21.10.2026, `@babylonjs/core` 9.31.0, без зависимостей) |
 | Карты | MapLibre GL JS | BSD-3-Clause (проверено, источник 2021) |
 | Слои больших данных, движение тысяч агентов | deck.gl | MIT |
 | Маршруты | онлайн-сервисы OSRM / Valhalla / GraphHopper (своя офлайн-маршрутизация не нужна) | BSD-2 / MIT / Apache-2.0 |
@@ -50,7 +50,7 @@
 | Диаграммы состояний | форма определений XState (подмножество, без подключения библиотеки) и свой лёгкий исполнитель для сотен тысяч агентов (Ф0-4, П-21) | XState — MIT; код не используется |
 | Системная динамика | свой интегратор; импорт XMILE, Vensim через SDEverywhere | SDEverywhere — **проверить** |
 | Данные | DuckDB (WASM), SheetJS CE для Excel | MIT / Apache-2.0 |
-| Графики | ECharts | Apache-2.0 |
+| Графики | ECharts (подключён в Ф0-6б) | Apache-2.0 (проверено 21.10.2026, версия 6.1.0; его зависимости zrender 6.1.0 — BSD-3-Clause, tslib 2.3.0 — 0BSD) |
 | Дорожный трафик | SUMO, связка через TraCI | EPL-2.0 (проверено) |
 | Пешеходы | JuPedSim; на старте — простая своя модель социальных сил | LGPL-3.0 (проверено) |
 | Оптимизация и статистика | Optuna и SciPy (Python рядом) или CMA-ES на JS | MIT / BSD-3 |
@@ -71,6 +71,7 @@
 | Vitest 5 | тесты | MIT |
 | ESLint 10, @eslint/js, typescript-eslint 8 | линтер | MIT |
 | GitHub Actions: actions/checkout, actions/setup-node, actions/upload-artifact, actions/download-artifact, pnpm/action-setup | CI и превью | MIT |
+| Playwright 1.64 (`@playwright/test`, с ним `playwright` и `playwright-core`) | проверки показа в браузере и скриншоты сцены в CI (Ф0-6б, П-52) | Apache-2.0 (проверено 21.10.2026; релизы раз в 1–2 месяца, Microsoft) |
 
 - **Транзитивные зависимости** (124 пакета): MIT, Apache-2.0, BSD-2/3-Clause, ISC, BlueOak-1.0.0. Исключение — `lightningcss` (сжатие CSS внутри Vite) под MPL-2.0. Это слабый копилефт на уровне файлов: как инструмент использовать можно, условия касаются только правки его собственных файлов.
 - **TypeScript 6.0, а не 7:** TypeScript 7 (июль 2026) пока не поддерживается typescript-eslint.

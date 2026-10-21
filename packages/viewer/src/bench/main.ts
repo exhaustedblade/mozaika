@@ -65,6 +65,9 @@ class Panel {
     title.textContent = t.benchTitle;
     const about = document.createElement('p');
     about.textContent = t.benchAbout;
+    const howTo = document.createElement('p');
+    howTo.className = 'bench-how-to';
+    howTo.textContent = t.benchHowTo;
     const links = document.createElement('nav');
     for (const agents of [100_000, 1_000_000]) {
       const link = document.createElement('a');
@@ -102,7 +105,7 @@ class Panel {
     }
     this.#progress.className = 'bench-progress';
     this.#progress.setAttribute('aria-live', 'polite');
-    this.element.append(title, about, links, this.#progress, list, this.#result);
+    this.element.append(title, about, howTo, links, this.#progress, list, this.#result);
     this.show('benchAgents', new Intl.NumberFormat(t.numberLocale).format(settings.agents));
   }
 

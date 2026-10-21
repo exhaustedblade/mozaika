@@ -34,6 +34,8 @@ const ru = {
   benchTitle: 'Замер сцены',
   benchAbout:
     'Ядро в Web Worker ведёт толпу, которая не останавливается: каждый идёт к случайной точке площади. Видеокарта рисует всех инстансингом и сама ведёт по отрезкам из снимков ядра. Первые 3 секунды — разогрев, потом 10 секунд замера.',
+  benchHowTo:
+    'Как замерить: откройте страницу в Chrome или Edge на Windows и в Chrome и Safari на macOS, разверните окно на весь экран, не трогайте мышь 15 секунд, нажмите «Скопировать итог» и пришлите текст. Потом то же для 1 000 000. Цель — не ниже 30 кадров в секунду на 100 000 (П-18).',
   benchAgents: 'Агентов',
   benchRenderer: 'Видеокарта',
   benchProgressWarmUp: 'разогрев…',
@@ -55,7 +57,7 @@ const ru = {
   demoLink: 'Демо: пункт обслуживания',
   demoLinkAbout: '3D-сцена, люди в очереди и у окон, параметры, графики и самопроверка модели.',
   benchLink: 'Замер сцены',
-  benchLinkAbout: '100 000 идущих агентов (и миллион): кадры в секунду, время кадра и снимка. Инструкция для замера — в пулл-реквесте.',
+  benchLinkAbout: '100 000 идущих агентов (и миллион): кадры в секунду, время кадра и снимка. Как прогнать и что прислать — на самой странице.',
   demoTitle: 'Пункт обслуживания',
   demoAbout:
     'Люди приходят, встают в очередь, идут к свободному окну, обслуживаются и уходят. Модель на блоках: Source → Queue → Service (окна — ResourcePool) → Sink; ядро считает её в Web Worker, видеокарта ведёт людей по отрезкам из снимков.',
@@ -124,6 +126,8 @@ const en: Messages = {
   benchTitle: 'Scene benchmark',
   benchAbout:
     'The kernel in a Web Worker drives a crowd that never stops: each person walks to a random point of the square. The graphics card draws them all by instancing and leads them along the segments of the kernel’s snapshots itself. The first 3 seconds warm up, then 10 seconds are measured.',
+  benchHowTo:
+    'How to measure: open the page in Chrome or Edge on Windows and in Chrome and Safari on macOS, make the window full screen, leave the mouse alone for 15 seconds, press “Copy the result” and send the text. Then the same for 1 000 000. The goal: at least 30 frames per second at 100 000 (P-18).',
   benchAgents: 'Agents',
   benchRenderer: 'Graphics card',
   benchProgressWarmUp: 'warming up…',
@@ -145,7 +149,7 @@ const en: Messages = {
   demoLink: 'Demo: a service point',
   demoLinkAbout: 'A 3D scene with people in the line and at the windows, parameters, charts and the model’s self-check.',
   benchLink: 'Scene benchmark',
-  benchLinkAbout: '100 000 walking agents (and a million): frames per second, frame and snapshot times. How to run it: see the pull request.',
+  benchLinkAbout: '100 000 walking agents (and a million): frames per second, frame and snapshot times. How to run it and what to send: on the page itself.',
   demoTitle: 'Service point',
   demoAbout:
     'People come in, join the line, walk to a free window, are served and leave. A model on blocks: Source → Queue → Service (the windows are a ResourcePool) → Sink; the kernel runs it in a Web Worker, the graphics card leads the people along the segments of its snapshots.',

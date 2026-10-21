@@ -261,6 +261,10 @@ body.full-screen #app {
   overflow-wrap: anywhere;
 }
 
+.bench-panel .bench-how-to {
+  color: var(--fg);
+}
+
 .bench-progress {
   font-weight: 600;
 }
