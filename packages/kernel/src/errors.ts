@@ -19,6 +19,12 @@ export type SimulationErrorCode =
   | 'INVALID_YIELD'
   /** run() or step() was called from inside an event. */
   | 'REENTRANT_CALL'
+  /**
+   * An operation does not fit the current state of the model, e.g. releasing
+   * a resource unit nobody holds or moving an entity out of a block that is not
+   * connected. Raised by the blocks package.
+   */
+  | 'INVALID_STATE'
   /** An event action threw; the original error is the `cause`. */
   | 'EVENT_FAILED'
   /** A process body threw; the original error is the `cause`. */
