@@ -1,0 +1,19 @@
+{
+  "name": "@mozaika/kernel",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Simulation time kernel: event queue, processes, agents and system dynamics on one clock.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "@mozaika/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  }
+}
