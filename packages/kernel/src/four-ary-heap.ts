@@ -41,6 +41,10 @@ export class FourAryHeap implements EventQueue {
     return this.#size;
   }
 
+  get byteLength(): number {
+    return this.#times.byteLength + this.#slots.byteLength + this.#positions.byteLength;
+  }
+
   add(slot: number, time: number): void {
     if (this.#size === this.#times.length) this.#growHeap();
     if (slot >= this.#positions.length) this.#growPositions(slot);

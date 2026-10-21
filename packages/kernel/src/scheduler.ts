@@ -10,7 +10,7 @@
  */
 import type { EventInfo, EventQueue } from './event-queue.js';
 import { EventRecords } from './event-records.js';
-import { FourAryHeap } from './four-ary-heap.js';
+import { LadderQueue } from './ladder-queue.js';
 import { ModelEvents } from './model-events.js';
 import type { Simulation } from './simulation.js';
 import { WakeUps } from './wake-ups.js';
@@ -35,6 +35,17 @@ export interface EventKindHandler {
 /** Kind numbers are kept in a Uint16Array column of the records. */
 const MAX_KINDS = 0x10000;
 
+/**
+ * The queue the kernel runs on: the ladder queue, chosen over the 4-ary heap
+ * by measurement (П-48). A choice in the code rather than an option of the
+ * simulation: both fire events in the same order, so a model has nothing to
+ * choose, and with one class in a process the calls to the queue stay
+ * monomorphic, so V8 inlines them. FourAryHeap passes the same tests.
+ */
+function createEventQueue(records: EventRecords): EventQueue {
+  return new LadderQueue(records);
+}
+
 export class Scheduler {
   /** Current model time. Only the run loop moves it. */
   now: number;
@@ -43,7 +54,7 @@ export class Scheduler {
   /** Processes going on after a timeout or a signal, and listeners of signals. */
   readonly wakeUps: WakeUps;
   readonly #records = new EventRecords();
-  readonly #queue: EventQueue = new FourAryHeap(this.#records);
+  readonly #queue: EventQueue = createEventQueue(this.#records);
   /** The handler of each kind of events, by kind number. */
   readonly #kinds: EventKindHandler[] = [];
   #nextSeq = 0;

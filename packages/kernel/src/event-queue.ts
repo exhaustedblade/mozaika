@@ -42,12 +42,18 @@ export interface EventHandle extends EventInfo {
  * of a slot from the records when times are equal.
  *
  * The records, the kinds of events and their handlers do not depend on how
- * the queue is built, so the 4-ary heap (four-ary-heap.ts) can be replaced,
- * e.g. by a ladder queue (Tang et al., 2005), without touching the rest (П-28).
+ * the queue is built (П-28): the kernel has two queues, the ladder queue
+ * (ladder-queue.ts) and the 4-ary heap (four-ary-heap.ts), and scheduler.ts
+ * picks one.
  */
 export interface EventQueue {
   /** Number of pending events. */
   readonly size: number;
+  /**
+   * Bytes of the typed arrays the queue holds. Lets tests check that its memory
+   * is bounded by the pending events, however many have been cancelled (П-28).
+   */
+  readonly byteLength: number;
   /** Adds the event of `slot`, due at `time`. */
   add(slot: number, time: number): void;
   /** Removes a pending event that has not fired yet: a cancellation. */
