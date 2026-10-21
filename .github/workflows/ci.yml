@@ -54,40 +54,6 @@ jobs:
       # below the threshold fails the step despite the pipe into tee.
       - run: pnpm --silent bench | tee -a "$GITHUB_STEP_SUMMARY"
         shell: bash
-      # TEMPORARY (F0-6a): main and this branch in turn on the same runner, 5 rounds.
-      - name: A/B with main on this runner (temporary)
-        shell: bash
-        run: |
-          git fetch --depth=1 origin main
-          git worktree add ../main-ab FETCH_HEAD
-          (cd ../main-ab && pnpm install --frozen-lockfile > /dev/null && pnpm -r build > /dev/null)
-          for round in 1 2 3 4 5; do
-            for side in main branch; do
-              if [ "$side" = main ]; then dir=../main-ab; else dir=.; fi
-              (cd "$dir/packages/kernel" && node --expose-gc bench/agents.ts) | grep -E '^\| (Единиц|Память на)' | sed "s/^/$side $round K /"
-              (cd "$dir/packages/blocks" && node bench/mm1.ts && node --expose-gc bench/crowded-delay.ts) | grep -E '^\| (M/M/1|Единиц|Память на)' | sed "s/^/$side $round B /"
-            done
-          done
-          for side in main branch; do
-            if [ "$side" = main ]; then dir=../main-ab; else dir=.; fi
-            for flags in "" "--no-turbo-inlining"; do
-              rm -rf "/tmp/prof-$side"
-              (cd "$dir/packages/blocks" && node $flags --cpu-prof --cpu-prof-dir="/tmp/prof-$side" bench/mm1.ts > /dev/null)
-              echo "PROFILE $side $flags"
-              python3 - "/tmp/prof-$side" <<'PY'
-          import collections, glob, json, sys
-          profile = json.load(open(glob.glob(sys.argv[1] + '/*.cpuprofile')[0]))
-          nodes = {node['id']: node for node in profile['nodes']}
-          times = collections.Counter()
-          for sample, delta in zip(profile['samples'], profile['timeDeltas']):
-              frame = nodes[sample]['callFrame']
-              times[f"{frame['functionName'] or '(anon)'} {frame['url'].split('/')[-1]}:{frame['lineNumber']}"] += delta
-          total = sum(times.values())
-          for name, time in times.most_common(25):
-              print(f'PROF {100 * time / total:5.1f}% {name}')
-          PY
-            done
-          done
 
   build:
     name: Build
