@@ -117,6 +117,36 @@ function creationTimesOfFlow(seed: number): string[] {
   return [...leaving, `exit ${String(exit.count)} ${String(timeInSystem.mean)} ${String(timeInSystem.count)}`];
 }
 
+/**
+ * A crowd in two Delays: 2 000 arrivals per unit at random stay a random time,
+ * so about 4 000 entities are in the queue of events at once, and 16 arrivals
+ * per unit on a grid of sixteenths stay exactly four units, so they leave on
+ * the grid, at the same moments as new arrivals of the grid. Returns who left
+ * when, with the creation time, and the statistics, as lines.
+ */
+function outcomesOfCrowd(seed: number): string[] {
+  const sim = new Simulation({ seed });
+  const leaving: string[] = [];
+  const exit = new Sink(sim, {
+    name: 'exit',
+    onEnter: ({ agent, now }) => {
+      leaving.push(`${agent.population.name}#${String(agent.id)} ${String(now)} ${String(agent.createdAt)}`);
+    },
+  });
+  const crowd = new Source(sim, { name: 'crowd', interval: (random) => random.exponential(1 / 2_000) });
+  const grid = new Source(sim, { name: 'grid', interval: 1 / 16 });
+  const wander = crowd.connect(new Delay(sim, { name: 'wander', duration: (random) => random.exponential(2) }));
+  const wait = grid.connect(new Delay(sim, { name: 'wait', duration: 4 }));
+  wander.connect(exit);
+  wait.connect(exit);
+  sim.run(12);
+  return [
+    ...leaving,
+    `exit ${String(exit.count)} ${String(exit.stats.timeInSystem.mean)}`,
+    `wander ${String(wander.stats.content.mean)} wait ${String(wait.stats.content.mean)}`,
+  ];
+}
+
 describe('blocks on the kernel', () => {
   it('give an identical trace for the same seed and a different one for another seed', () => {
     const first = traceOfFlow(2026);
@@ -169,6 +199,17 @@ describe('blocks on the kernel', () => {
     expect({ lines: sharedPool.length, fingerprint: fingerprint(sharedPool) }).toEqual({
       lines: 342,
       fingerprint: 'a15b60a4',
+    });
+  });
+
+  it('give the same outcomes of a crowd as with the 4-ary heap before Ф0-4д', () => {
+    // Recorded with the indexed 4-ary heap (commit cfe3d55): a large queue
+    // with simultaneous exits and arrivals on a grid gives the same exits at
+    // the same times, whatever the queue is built of.
+    const crowd = outcomesOfCrowd(2026);
+    expect({ lines: crowd.length, fingerprint: fingerprint(crowd) }).toEqual({
+      lines: 20_451,
+      fingerprint: '842793fd',
     });
   });
 });
