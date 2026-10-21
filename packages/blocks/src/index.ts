@@ -1,12 +1,23 @@
 import { PACKAGE_NAME as KERNEL_PACKAGE_NAME } from '@mozaika/kernel';
 
 /**
- * Library of process blocks (Source, Queue, Service, Delay, Sink and others),
- * each a kernel process with ports.
- *
- * Placeholder entry point; the first blocks arrive in task F0-3.
+ * Library of process blocks built on the kernel: entities come from a Source,
+ * wait in a Queue, are served by a Service with units of a ResourcePool, are
+ * held by a Delay and leave through a Sink. Each entity is a kernel process
+ * that moves from block to block. Behaviour: docs/BLOCKS.md.
  */
 export const PACKAGE_NAME = '@mozaika/blocks';
 
 /** Workspace packages this one is built on. */
 export const DEPENDS_ON: readonly string[] = [KERNEL_PACKAGE_NAME];
+
+export type { EntityReceiver, HoldingBlockOptions } from './block.js';
+export { Delay, type DelayOptions } from './delay.js';
+export type { Distribution } from './distribution.js';
+export { Entity } from './entity.js';
+export { Queue, type QueueOptions } from './queue.js';
+export { ResourcePool, type ResourcePoolOptions } from './resource-pool.js';
+export { Service, type ServiceOptions } from './service.js';
+export { Sink, type SinkOptions } from './sink.js';
+export { Source, type SourceOptions } from './source.js';
+export { Tally, TimeAverage } from './statistics.js';
