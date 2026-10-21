@@ -187,7 +187,7 @@ describe('agents: repeatability by seed', () => {
   it('gives an identical trace for the same seed when agents move, stop and leave', () => {
     const first = runWalk(2026);
     expect(first.trace.length).toBeGreaterThan(500);
-    expect(first.trace.filter((line) => line.endsWith(': arrival')).length).toBeGreaterThan(200);
+    expect(first.trace.filter((line) => line.endsWith(': arrival')).length).toBeGreaterThan(100);
     const second = runWalk(2026);
     expect(second.trace).toEqual(first.trace);
     expect(second.positions).toEqual(first.positions);

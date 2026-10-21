@@ -111,7 +111,9 @@ describe('population snapshots: columns', () => {
         initial: 'walking',
         states: {
           walking: {
-            entry: ({ agent, random }) => agent.moveTo({ x: random.uniform(), y: random.uniform() }, { speed: 0.5 }),
+            entry: ({ agent, random }) => {
+              agent.moveTo({ x: random.uniform(), y: random.uniform() }, { speed: 0.5 });
+            },
             on: { 'agent.arrived': { target: 'walking', reenter: true } },
           },
         },
@@ -170,17 +172,23 @@ describe('population snapshots: double buffering', () => {
     expectSegmentsOf(third, agents, sim);
   });
 
-  it('takes back a buffer that comes back as another object, as one transferred from a Web Worker does', () => {
+  it('takes back a buffer transferred there and back, as from a Web Worker to a viewer', () => {
     const { agents } = shuffledPopulation();
     const snapshots = new PopulationSnapshots(agents);
     const first = snapshots.take();
     if (first === undefined) throw new Error('no snapshot');
-    // A transfer detaches the sender's ArrayBuffer and gives the receiver a new object for the memory.
-    const returned = first.buffer.slice(0);
-    snapshots.giveBack({ slot: first.slot, buffer: returned });
+    // A transfer detaches the sender's ArrayBuffer and gives the receiver a new object for the same
+    // memory, as ArrayBuffer.prototype.transfer (ES2024) does; the library of this package is ES2023.
+    const transfer = (buffer: ArrayBuffer): ArrayBuffer =>
+      (buffer as unknown as { transfer(): ArrayBuffer }).transfer();
+    const atViewer = transfer(first.buffer);
+    expect(first.buffer.byteLength).toBe(0);
+    const backHere = transfer(atViewer);
+    snapshots.giveBack({ slot: first.slot, buffer: backHere });
     const next = snapshots.take();
     expect(next?.slot).toBe(first.slot);
-    expect(next?.buffer).toBe(returned);
+    expect(next?.buffer).toBe(backHere);
+    expect([...(next?.ids ?? [])]).toEqual([...agents.ids()]);
   });
 
   it('gives a larger buffer when the population outgrows a free one', () => {
@@ -205,16 +213,20 @@ describe('population snapshots: double buffering', () => {
     const snapshots = new PopulationSnapshots(agents);
     const first = snapshots.take();
     if (first === undefined) throw new Error('no snapshot');
-    expect(() => snapshots.giveBack({ slot: 1, buffer: new ArrayBuffer(first.buffer.byteLength) })).toThrow(
-      simulationError('INVALID_ARGUMENT', { message: containing('not lent') }),
-    );
-    expect(() => snapshots.giveBack({ slot: 7, buffer: first.buffer })).toThrow(simulationError('INVALID_ARGUMENT'));
-    expect(() => snapshots.giveBack({ slot: first.slot, buffer: new ArrayBuffer(8) })).toThrow(
-      simulationError('INVALID_ARGUMENT', { message: containing('bytes') }),
-    );
+    expect(() => {
+      snapshots.giveBack({ slot: 1, buffer: new ArrayBuffer(first.buffer.byteLength) });
+    }).toThrow(simulationError('INVALID_ARGUMENT', { message: containing('not lent') }));
+    expect(() => {
+      snapshots.giveBack({ slot: 7, buffer: first.buffer });
+    }).toThrow(simulationError('INVALID_ARGUMENT'));
+    expect(() => {
+      snapshots.giveBack({ slot: first.slot, buffer: new ArrayBuffer(8) });
+    }).toThrow(simulationError('INVALID_ARGUMENT', { message: containing('bytes') }));
     // Refused returns leave the buffer lent.
     expect(snapshots.lent).toBe(1);
     snapshots.giveBack(first);
-    expect(() => snapshots.giveBack(first)).toThrow(simulationError('INVALID_ARGUMENT'));
+    expect(() => {
+      snapshots.giveBack(first);
+    }).toThrow(simulationError('INVALID_ARGUMENT'));
   });
 });

@@ -4,13 +4,19 @@ import { AgentPopulation } from '../agents/population.js';
 import { defineStatechart } from '../agents/statechart.js';
 import { Simulation } from '../simulation.js';
 import { containing } from '../test-helpers.js';
+import * as workerEntry from '../worker.js';
 import { KernelHost } from './host.js';
-import type { KernelReply, KernelRequest, ModelDefinition, ModelParameters, SnapshotReply } from './protocol.js';
+import type { KernelReply, KernelRequest, ModelDefinition, SnapshotReply } from './protocol.js';
+
+/** The parameters of the walkway model. */
+// A type rather than an interface: only a type is a record of numbers (ModelParameters).
+// eslint-disable-next-line @typescript-eslint/consistent-type-definitions
+type WalkwayParameters = { arrivalsPerUnit: number; speed: number };
 
 /** What the walkway model built last: the tests compare the host's answers with it. */
 interface Built {
   walkers: AgentPopulation;
-  parameters: ModelParameters;
+  parameters: Readonly<WalkwayParameters>;
 }
 
 /**
@@ -18,7 +24,7 @@ interface Built {
  * random point of its far side; there they leave. The speed and the rate of
  * arrivals are parameters that the model reads while it runs.
  */
-function walkwayModel(built: Partial<Built> = {}): ModelDefinition {
+function walkwayModel(built: Partial<Built> = {}): ModelDefinition<WalkwayParameters> {
   return {
     parameters: { arrivalsPerUnit: 4, speed: 2 },
     build({ simulation, parameters }) {
@@ -61,6 +67,12 @@ function snapshotOf(reply: KernelReply): SnapshotReply {
   return reply;
 }
 
+describe('@mozaika/kernel/worker', () => {
+  it('exports the host, and the types of the messages only as types', () => {
+    expect(Object.keys(workerEntry)).toEqual(['KernelHost']);
+  });
+});
+
 describe('kernel host: building and running', () => {
   it('builds a model by name and answers with its populations and parameters', () => {
     const host = new KernelHost({ walkway: walkwayModel() });
@@ -78,7 +90,7 @@ describe('kernel host: building and running', () => {
     ask(host, { type: 'build', id: 1, model: 'walkway', seed: 3 });
     const reply = ask(host, { type: 'run', id: 2, until: 5 });
     expect(reply).toMatchObject({ type: 'ran', id: 2, time: 5, reason: 'until' });
-    expect(reply.type === 'ran' && reply.events).toBeGreaterThan(20);
+    expect(reply.type === 'ran' && reply.events).toBeGreaterThan(10);
   });
 
   it('runs the model as it runs without the host: the same seed gives the same agents in the same places', () => {

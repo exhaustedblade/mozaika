@@ -22,7 +22,18 @@ export type {
   TransitionsConfig,
 } from './agents/definition.js';
 export { MAX_STATES, type StateNode, type Timer, type Transition } from './agents/compile.js';
-export { type AddAgentOptions, AgentPopulation, type AgentPopulationOptions } from './agents/population.js';
+export type { MoveOptions, Point } from './agents/motion.js';
+export {
+  type AddAgentOptions,
+  AgentPopulation,
+  type AgentPopulationOptions,
+  type AnyPopulation,
+} from './agents/population.js';
+export {
+  type PopulationSnapshot,
+  PopulationSnapshots,
+  type ReturnedSnapshot,
+} from './agents/population-snapshots.js';
 export { defineStatechart, rate, Statechart } from './agents/statechart.js';
 export { type SimulationErrorCode, SimulationError } from './errors.js';
 export type { EventHandle, EventInfo } from './event-queue.js';

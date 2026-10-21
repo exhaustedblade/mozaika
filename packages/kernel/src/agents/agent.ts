@@ -12,6 +12,7 @@ import { messageOf, SimulationError } from '../errors.js';
 import type { AgentAction, AgentArgs, AgentEvent } from './definition.js';
 import type { AgentPopulation } from './population.js';
 import { requireAgentDelay, type StateNode, type Timer, type Transition } from './compile.js';
+import { type MoveOptions, type Point, requireMoveOptions, requirePoint } from './motion.js';
 import type { AgentStore } from './store.js';
 
 /** The event of the step in which an agent is created and enters its initial state. */
@@ -19,6 +20,9 @@ const START_EVENT: AgentEvent = Object.freeze({ type: 'agent.start' });
 
 /** The event of a step started by check(). */
 const CHECK_EVENT: AgentEvent = Object.freeze({ type: 'agent.check' });
+
+/** The event of the step in which an agent arrives at the end of its walk; on['agent.arrived'] reacts to it. */
+const ARRIVED_EVENT: AgentEvent = Object.freeze({ type: 'agent.arrived' });
 
 /**
  * Most eventless transitions one step may take in a row. Real chains of
@@ -32,7 +36,7 @@ const MAX_EVENTLESS_TRANSITIONS = 1000;
  * agent still reports (П-35) without a table of removed agents: a WeakMap
  * entry per removal grew with every agent that passed a Sink.
  */
-export function removedPlace(stateCode: number): number {
+function removedPlace(stateCode: number): number {
   return -1 - stateCode;
 }
 
@@ -53,13 +57,17 @@ export interface AgentFriend {
   fireTimer<TContext extends object>(agent: Agent<TContext>, timer: Timer<TContext>): void;
   /** The agent takes the step of a message delivered to it, or discards it. */
   receive<TContext extends object>(agent: Agent<TContext>, message: AgentEvent): void;
+  /** The agent takes the step of its arrival at the end of a walk. */
+  arrive<TContext extends object>(agent: Agent<TContext>): void;
   /**
    * Removes the agent from its population now, or at the end of its step if
    * it is taking one; returns false if it was already removed or leaving.
    */
   remove<TContext extends object>(agent: Agent<TContext>): boolean;
-  /** Sets the agent's place: a row of the columns after another agent's removal moved it, or removedPlace(). */
+  /** Sets the agent's row of the columns after another agent's removal moved it there. */
   moveTo<TContext extends object>(agent: Agent<TContext>, index: number): void;
+  /** The population has removed the agent: it keeps the state it was in and its creation time. */
+  markRemoved<TContext extends object>(agent: Agent<TContext>, stateCode: number, createdAt: number): void;
 }
 
 /**
@@ -72,8 +80,6 @@ export let agentFriend: AgentFriend;
 export class Agent<TContext extends object = object> {
   /** Number in the population: 1, 2, 3… in the order of creation unless given at creation; never reused. */
   readonly id: number;
-  /** Model time at which the agent was created. */
-  readonly createdAt: number;
   /** The agent's fields; actions change them in place. */
   readonly context: TContext;
   readonly #store: AgentStore<TContext>;
@@ -83,8 +89,11 @@ export class Agent<TContext extends object = object> {
    * into its place, so every access to the columns reads it anew.
    */
   #index: number;
-  /** True while the agent takes a step: its own check() then waits for the end of the step, and so does its removal. */
-  #busy = false;
+  /**
+   * The creation time of a removed agent, which has left the columns; undefined
+   * while the agent is in them, so the field holds no number object until then.
+   */
+  #createdAtAfterRemoval: number | undefined = undefined;
 
   static {
     agentFriend = {
@@ -94,9 +103,16 @@ export class Agent<TContext extends object = object> {
       receive: (agent, message) => {
         agent.#receive(message);
       },
+      arrive: (agent) => {
+        agent.#arrive();
+      },
       remove: (agent) => agent.#remove(),
       moveTo: (agent, index) => {
         agent.#index = index;
+      },
+      markRemoved: (agent, stateCode, createdAt) => {
+        agent.#index = removedPlace(stateCode);
+        agent.#createdAtAfterRemoval = createdAt;
       },
     };
   }
@@ -109,9 +125,14 @@ export class Agent<TContext extends object = object> {
     this.#store = store;
     this.context = context;
     this.id = id;
-    this.createdAt = store.simulation.now;
     this.#index = store.add(this);
     this.#start();
+  }
+
+  /** Model time at which the agent was created. */
+  get createdAt(): number {
+    const index = this.#index;
+    return index >= 0 ? this.#store.createdAtOf(index) : (this.#createdAtAfterRemoval ?? Number.NaN);
   }
 
   get population(): AgentPopulation<TContext> {
@@ -143,6 +164,40 @@ export class Agent<TContext extends object = object> {
     this.#store.send(this, requireMessage(event));
   }
 
+  /** Where the agent is now (docs/AGENTS.md, section 9): a new object each time. */
+  get position(): Point {
+    return this.#store.position(this.#rowToUse('tell where it is'));
+  }
+
+  /** True while the agent walks: its arrival is still to come. */
+  get moving(): boolean {
+    return !this.removed && this.#store.isMoving(this.#index);
+  }
+
+  /** The agent stands at `point` from now on; a walk it was on is over, and its arrival will not come. */
+  placeAt(point: Point): void {
+    const { x, y } = requirePoint(point, 'placeAt() point');
+    this.#store.placeAt(this.#rowToUse('stand at a point'), x, y);
+  }
+
+  /**
+   * The agent walks in a straight line from where it is now to `point`, at
+   * `options.speed` or for `options.duration`. It arrives with one event of
+   * the kernel, at which it takes a step with the event `agent.arrived`; the
+   * arrival of an earlier walk will not come. With `options.stopOnExit`, the
+   * walk stops when the agent next leaves a state.
+   */
+  moveTo(point: Point, options: MoveOptions): void {
+    const { x, y } = requirePoint(point, 'moveTo() point');
+    const walk = requireMoveOptions(options);
+    this.#store.moveTo(this.#rowToUse('move'), x, y, walk);
+  }
+
+  /** The agent stops where it is now, and its arrival will not come. Returns whether it was walking. */
+  stop(): boolean {
+    return this.#store.stop(this.#rowToUse('stop'));
+  }
+
   /**
    * Checks the conditions (eventless transitions) of the current state now and
    * takes the first enabled one, then the next, until none is enabled. Call it
@@ -150,7 +205,7 @@ export class Agent<TContext extends object = object> {
    * is taking a step of its own: the step checks the conditions at its end.
    */
   check(): void {
-    if (this.#busy || this.removed || this.done) return;
+    if (this.removed || this.#store.isStepping(this) || this.done) return;
     this.#react(CHECK_EVENT, undefined);
   }
 
@@ -180,6 +235,12 @@ export class Agent<TContext extends object = object> {
     if (!this.#react(message, transitions)) this.#store.discardedMessages++;
   }
 
+  /** An agent in a final state takes no steps; it arrives all the same, since blocks may lead it on. */
+  #arrive(): void {
+    if (this.done) return;
+    this.#react(ARRIVED_EVENT, this.#currentState().on.get(ARRIVED_EVENT.type));
+  }
+
   /**
    * One step: takes the first enabled transition among `triggered`, if any,
    * then eventless transitions until none is enabled. Returns whether a
@@ -200,20 +261,20 @@ export class Agent<TContext extends object = object> {
   }
 
   #beginStep(event: AgentEvent): AgentArgs<TContext> {
-    this.#busy = true;
+    this.#store.beginStep(this);
     const now = this.#store.simulation.now;
     return { agent: this, context: this.context, event, now, random: this.#store.random };
   }
 
   /** Ends a step; an agent that asked to be removed during it leaves now. */
   #endStep(): void {
-    this.#busy = false;
+    this.#store.endStep();
     if (this.#store.leavesAfterStep(this)) this.#store.removeAt(this.#index);
   }
 
   #remove(): boolean {
     if (this.removed) return false;
-    if (this.#busy) return this.#store.leaveAfterStep(this);
+    if (this.#store.isStepping(this)) return this.#store.leaveAfterStep(this);
     this.#store.removeAt(this.#index);
     return true;
   }
@@ -261,9 +322,9 @@ export class Agent<TContext extends object = object> {
     for (const timer of state.after) this.#setTimer(timer, args);
   }
 
-  /** The timers of the state are cancelled, then its exit actions run. */
+  /** The timers of the state are cancelled and a walk bound to it stops, then its exit actions run. */
   #exit(state: StateNode<TContext>, args: AgentArgs<TContext>): void {
-    this.#store.cancelTimers(this.#index);
+    this.#store.leaveState(this.#index);
     runActions(state.exit, args);
   }
 
@@ -278,6 +339,19 @@ export class Agent<TContext extends object = object> {
     const random = this.#store.delayStream(timer);
     const value = delay({ agent: this, context: this.context, event: args.event, now: args.now, random });
     return requireAgentDelay(value, `delay "${timer.key}"`);
+  }
+
+  /** The agent's row, for something only an agent in the population can do; a removed agent is refused. */
+  #rowToUse(action: string): number {
+    const index = this.#index;
+    if (index < 0) {
+      const name = `${this.#store.name}#${String(this.id)}`;
+      throw new SimulationError(
+        'INVALID_STATE',
+        `Agent "${name}" has been removed from its population: it cannot ${action}`,
+      );
+    }
+    return index;
   }
 
   #currentState(): StateNode<TContext> {

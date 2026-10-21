@@ -27,6 +27,11 @@ function onSegment(from: Point, to: Point, start: number, arrival: number, time:
   return { x: from.x + (to.x - from.x) * k, y: from.y + (to.y - from.y) * k };
 }
 
+/** A point as the population's positions() gives it: x, then y. */
+function coordinates(point: Point): number[] {
+  return [point.x, point.y];
+}
+
 /** Records the position of `agent` at each of `times`, read inside events of the model at those times. */
 function positionsAt(sim: Simulation, agent: Agent, times: readonly number[]): Point[] {
   const seen: Point[] = [];
@@ -109,12 +114,29 @@ describe('movement: positions', () => {
     const positions = agents.positions();
     expect(positions).toBeInstanceOf(Float64Array);
     expect([...positions]).toEqual([
-      ...Object.values(onSegment({ x: 0, y: 0 }, { x: 8, y: 6 }, 0, 5, 2.5)),
+      ...coordinates(onSegment({ x: 0, y: 0 }, { x: 8, y: 6 }, 0, 5, 2.5)),
       -1,
       1,
-      ...Object.values(onSegment({ x: 0, y: 0 }, { x: 0, y: 3 }, 0, 6, 2.5)),
+      ...coordinates(onSegment({ x: 0, y: 0 }, { x: 0, y: 3 }, 0, 6, 2.5)),
     ]);
     expect([...positions]).toEqual(agents.agents.flatMap((agent) => [agent.position.x, agent.position.y]));
+  });
+
+  it('writes the positions into an array it is given, so a large population can be read often without garbage', () => {
+    const sim = new Simulation();
+    const agents = new AgentPopulation(sim, { name: 'agents', statechart: still });
+    agents.add().placeAt({ x: 1, y: 2 });
+    agents.add().moveTo({ x: 4, y: 0 }, { duration: 2 });
+    sim.run(1);
+    const into = new Float64Array(6).fill(-1);
+    expect(agents.positions(into)).toBe(into);
+    expect([...into]).toEqual([1, 2, 2, 0, -1, -1]);
+    expect(() => agents.positions(new Float64Array(3))).toThrow(
+      simulationError('INVALID_ARGUMENT', { message: containing('at least 4') }),
+    );
+    expect(() => agents.positions(new Float32Array(4) as unknown as Float64Array)).toThrow(
+      simulationError('INVALID_ARGUMENT'),
+    );
   });
 
   it('gives zeros for a population whose agents have never moved', () => {
@@ -273,9 +295,9 @@ describe('movement: arrival', () => {
     const { sim, trace } = tracedSimulation();
     const agents = new AgentPopulation(sim, { name: 'agents', statechart: walker });
     const [first, second, third] = [agents.add(), agents.add(), agents.add()];
-    third?.moveTo({ x: 0, y: 4 }, { speed: 2 });
-    first?.moveTo({ x: 2, y: 0 }, { speed: 1 });
-    second?.moveTo({ x: 1, y: 0 }, { duration: 2 });
+    third.moveTo({ x: 0, y: 4 }, { speed: 2 });
+    first.moveTo({ x: 2, y: 0 }, { speed: 1 });
+    second.moveTo({ x: 1, y: 0 }, { duration: 2 });
     sim.run();
     expect(trace).toEqual(['2 0 #0 agents#3: arrival', '2 0 #1 agents#1: arrival', '2 0 #2 agents#2: arrival']);
   });
@@ -325,7 +347,9 @@ describe('movement: cancelling the arrival', () => {
       initial: 'walking',
       states: {
         walking: {
-          entry: ({ agent }) => agent.moveTo({ x: 8, y: 0 }, { duration: 8, stopOnExit: true }),
+          entry: ({ agent }) => {
+            agent.moveTo({ x: 8, y: 0 }, { duration: 8, stopOnExit: true });
+          },
           exit: ({ agent }) => exits.push(`moving ${String(agent.moving)} at ${String(agent.position.x)}`),
           on: { 'agent.arrived': 'arrived', alarm: 'frozen' },
         },
@@ -334,7 +358,13 @@ describe('movement: cancelling the arrival', () => {
       },
     });
     const agent = new AgentPopulation(sim, { name: 'agents', statechart: chart }).add();
-    sim.schedule(3, () => agent.send({ type: 'alarm' }), { label: 'alarm' });
+    sim.schedule(
+      3,
+      () => {
+        agent.send({ type: 'alarm' });
+      },
+      { label: 'alarm' },
+    );
     sim.run();
     expect(exits).toEqual(['moving false at 3']);
     expect(trace).toEqual(['3 0 #1 alarm', '3 0 #2 agents#1: message "alarm"']);
@@ -354,7 +384,13 @@ describe('movement: cancelling the arrival', () => {
     });
     const agent = new AgentPopulation(sim, { name: 'agents', statechart: chart }).add();
     agent.moveTo({ x: 8, y: 0 }, { duration: 8 });
-    sim.schedule(3, () => agent.send({ type: 'alarm' }), { label: 'alarm' });
+    sim.schedule(
+      3,
+      () => {
+        agent.send({ type: 'alarm' });
+      },
+      { label: 'alarm' },
+    );
     sim.run();
     expect(trace).toEqual(['3 0 #1 alarm', '3 0 #2 agents#1: message "alarm"', '8 0 #0 agents#1: arrival']);
     expect(agent.state).toBe('arrived');
@@ -368,12 +404,16 @@ describe('movement: cancelling the arrival', () => {
     });
     const agent = new AgentPopulation(sim, { name: 'agents', statechart: chart }).add();
     agent.moveTo({ x: 10, y: 0 }, { duration: 10, stopOnExit: true });
-    sim.schedule(2, () => agent.send({ type: 'next' }));
+    sim.schedule(2, () => {
+      agent.send({ type: 'next' });
+    });
     sim.run(2);
     expect(agent.moving).toBe(false);
     // A new move in state b, not bound: the next exit leaves it going.
     agent.moveTo({ x: 2, y: 5 }, { duration: 5 });
-    sim.schedule(1, () => agent.send({ type: 'next' }));
+    sim.schedule(1, () => {
+      agent.send({ type: 'next' });
+    });
     sim.run();
     expect(agent.state).toBe('c');
     expect(agent.position).toEqual({ x: 2, y: 5 });
@@ -395,8 +435,8 @@ describe('movement: cancelling the arrival', () => {
     // The last agent took the row of the removed one, with its segment.
     expect([...agents.ids()]).toEqual([1, 3]);
     expect([...agents.positions()]).toEqual([
-      ...Object.values(onSegment({ x: 0, y: 0 }, { x: 1, y: 0 }, 0, 1, 0.5)),
-      ...Object.values(onSegment({ x: 0, y: 0 }, { x: 0, y: 3 }, 0, 3, 0.5)),
+      ...coordinates(onSegment({ x: 0, y: 0 }, { x: 1, y: 0 }, 0, 1, 0.5)),
+      ...coordinates(onSegment({ x: 0, y: 0 }, { x: 0, y: 3 }, 0, 3, 0.5)),
     ]);
     sim.run();
     expect(trace).toEqual(['1 0 #0 agents#1: arrival', '3 0 #2 agents#3: arrival']);
@@ -433,22 +473,36 @@ describe('movement: errors', () => {
     const sim = new Simulation();
     const agent = new AgentPopulation(sim, { name: 'agents', statechart: still }).add();
     const target = { x: 1, y: 1 };
-    expect(() => agent.moveTo({ x: Number.NaN, y: 0 }, { speed: 1 })).toThrow(simulationError('NOT_A_NUMBER'));
-    expect(() => agent.moveTo({ x: 0, y: Infinity }, { speed: 1 })).toThrow(simulationError('NOT_FINITE'));
-    expect(() => agent.moveTo({ x: '1', y: 0 } as unknown as Point, { speed: 1 })).toThrow(
-      simulationError('INVALID_ARGUMENT', { message: containing('moveTo() point') }),
-    );
-    expect(() => agent.placeAt(undefined as unknown as Point)).toThrow(simulationError('INVALID_ARGUMENT'));
-    expect(() => agent.moveTo(target, {})).toThrow(
-      simulationError('INVALID_ARGUMENT', { message: containing('speed or duration') }),
-    );
-    expect(() => agent.moveTo(target, { speed: 1, duration: 1 })).toThrow(simulationError('INVALID_ARGUMENT'));
-    expect(() => agent.moveTo(target, { speed: 0 })).toThrow(simulationError('INVALID_ARGUMENT'));
-    expect(() => agent.moveTo(target, { speed: Infinity })).toThrow(simulationError('NOT_FINITE'));
-    expect(() => agent.moveTo(target, { duration: -1 })).toThrow(simulationError('NEGATIVE_DELAY'));
-    expect(() => agent.moveTo(target, { duration: 1, stopOnExit: 'yes' as unknown as boolean })).toThrow(
-      simulationError('INVALID_ARGUMENT'),
-    );
+    expect(() => {
+      agent.moveTo({ x: Number.NaN, y: 0 }, { speed: 1 });
+    }).toThrow(simulationError('NOT_A_NUMBER'));
+    expect(() => {
+      agent.moveTo({ x: 0, y: Infinity }, { speed: 1 });
+    }).toThrow(simulationError('NOT_FINITE'));
+    expect(() => {
+      agent.moveTo({ x: '1', y: 0 } as unknown as Point, { speed: 1 });
+    }).toThrow(simulationError('INVALID_ARGUMENT', { message: containing('moveTo() point') }));
+    expect(() => {
+      agent.placeAt(undefined as unknown as Point);
+    }).toThrow(simulationError('INVALID_ARGUMENT'));
+    expect(() => {
+      agent.moveTo(target, {});
+    }).toThrow(simulationError('INVALID_ARGUMENT', { message: containing('speed or duration') }));
+    expect(() => {
+      agent.moveTo(target, { speed: 1, duration: 1 });
+    }).toThrow(simulationError('INVALID_ARGUMENT'));
+    expect(() => {
+      agent.moveTo(target, { speed: 0 });
+    }).toThrow(simulationError('INVALID_ARGUMENT'));
+    expect(() => {
+      agent.moveTo(target, { speed: Infinity });
+    }).toThrow(simulationError('NOT_FINITE'));
+    expect(() => {
+      agent.moveTo(target, { duration: -1 });
+    }).toThrow(simulationError('NEGATIVE_DELAY'));
+    expect(() => {
+      agent.moveTo(target, { duration: 1, stopOnExit: 'yes' as unknown as boolean });
+    }).toThrow(simulationError('INVALID_ARGUMENT'));
     // Nothing refused has moved the agent.
     expect([agent.moving, sim.pendingEvents]).toEqual([false, 0]);
     expect(agent.position).toEqual({ x: 0, y: 0 });
@@ -460,8 +514,12 @@ describe('movement: errors', () => {
     const agent = agents.add();
     agents.remove(agent);
     const removed = simulationError('INVALID_STATE', { message: containing('agents#1') });
-    expect(() => agent.moveTo({ x: 1, y: 1 }, { speed: 1 })).toThrow(removed);
-    expect(() => agent.placeAt({ x: 1, y: 1 })).toThrow(removed);
+    expect(() => {
+      agent.moveTo({ x: 1, y: 1 }, { speed: 1 });
+    }).toThrow(removed);
+    expect(() => {
+      agent.placeAt({ x: 1, y: 1 });
+    }).toThrow(removed);
     expect(() => agent.stop()).toThrow(removed);
     expect(() => agent.position).toThrow(removed);
     expect(agent.moving).toBe(false);
@@ -471,7 +529,13 @@ describe('movement: errors', () => {
     const sim = new Simulation();
     const chart = defineStatechart({
       initial: 'a',
-      states: { a: { entry: ({ agent }) => agent.moveTo({ x: 1, y: 1 }, { speed: -2 }) } },
+      states: {
+        a: {
+          entry: ({ agent }) => {
+            agent.moveTo({ x: 1, y: 1 }, { speed: -2 });
+          },
+        },
+      },
     });
     const agents = new AgentPopulation(sim, { name: 'agents', statechart: chart });
     expect(() => agents.add()).toThrow(simulationError('AGENT_FAILED', { message: containing('agents#1') }));

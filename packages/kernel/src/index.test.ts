@@ -13,6 +13,7 @@ describe('@mozaika/kernel', () => {
       'AgentPopulation',
       'MAX_STATES',
       'PACKAGE_NAME',
+      'PopulationSnapshots',
       'Process',
       'Random',
       'Signal',
