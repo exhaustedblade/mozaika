@@ -7,13 +7,13 @@
  * record of the event holds the row.
  */
 import { eventFailure } from './errors.js';
-import type { EventKind, Scheduler } from './scheduler.js';
+import type { EventKindHandler, Scheduler } from './scheduler.js';
 import { SlotPool } from './slot-pool.js';
 
 /** A function that waits for an event, e.g. the one that resumes a process. */
 export type Listener = (value: unknown) => void;
 
-export class WakeUps implements EventKind {
+export class WakeUps implements EventKindHandler {
   readonly #scheduler: Scheduler;
   readonly #kind: number;
   /** Rows of the table; an event carries its row as `data`. */

@@ -14,6 +14,16 @@ export interface AgentPopulationOptions<TContext extends object = object> {
   readonly statechart: Statechart<TContext>;
 }
 
+export interface AddAgentOptions {
+  /**
+   * The agent's number: a whole number above every number the population has
+   * given so far, so numbers still grow in the order of creation and are
+   * never reused. Default: one more than the last number. A Source uses it to
+   * number its agents by arrival (docs/BLOCKS.md, section 3).
+   */
+  readonly id?: number;
+}
+
 /**
  * Names of the populations of each simulation, kept here because the kernel's
  * Simulation knows nothing about agents. Keyed weakly: a finished simulation
@@ -69,13 +79,15 @@ export class AgentPopulation<TContext extends object = object> {
 
   /**
    * Creates an agent. Its fields are a copy of the statechart's `context` (or
-   * what its function builds) with `fields` on top. The agent enters its
-   * initial state at once, inside this call, without an event.
+   * what its function builds) with `fields` on top; its number is
+   * `options.id` or the next one. The agent enters its initial state at once,
+   * inside this call, without an event.
    */
-  add(fields?: Partial<TContext>): Agent<TContext> {
-    const context = this.#createContext();
+  add(fields?: Partial<TContext>, options?: AddAgentOptions): Agent<TContext> {
+    const id = options?.id === undefined ? this.#store.nextId : this.#requireNewId(options.id);
+    const context = this.#createContext(id);
     if (fields !== undefined) Object.assign(context, requireFields(fields, this.name));
-    return new Agent(this.#store, context);
+    return new Agent(this.#store, context, id);
   }
 
   /**
@@ -147,8 +159,7 @@ export class AgentPopulation<TContext extends object = object> {
     for (const agent of [...this.#store.agents]) agent.check();
   }
 
-  #createContext(): TContext {
-    const id = this.#store.nextId;
+  #createContext(id: number): TContext {
     const now = this.simulation.now;
     try {
       return this.statechart.createContext({ id, now, random: this.#store.random });
@@ -160,6 +171,19 @@ export class AgentPopulation<TContext extends object = object> {
         { cause: error },
       );
     }
+  }
+
+  /** A number given at creation: whole, and above every earlier one. */
+  #requireNewId(id: unknown): number {
+    const next = this.#store.nextId;
+    if (typeof id !== 'number' || !Number.isSafeInteger(id) || id < next) {
+      throw new SimulationError(
+        'INVALID_ARGUMENT',
+        `AgentPopulation "${this.name}": add() id must be a whole number of at least ${String(next)}, ` +
+          `above every earlier one, got ${describeValue(id)}`,
+      );
+    }
+    return id;
   }
 }
 

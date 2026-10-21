@@ -118,14 +118,17 @@ describe('event kinds of packages built on the kernel', () => {
   it('refuses delays that schedule() refuses, and numbers that are not 32-bit integers', () => {
     const sim = new Simulation();
     const kind = new EventKind(sim, loggingHandler(sim, []));
-    expect(() => kind.schedule(-1, 0, 0)).toThrow(simulationError('NEGATIVE_DELAY'));
-    expect(() => kind.schedule(Number.NaN, 0, 0)).toThrow(simulationError('NOT_A_NUMBER'));
-    expect(() => kind.schedule(Infinity, 0, 0)).toThrow(simulationError('NOT_FINITE'));
+    const scheduling = (delay: number, target: number, data: number) => () => {
+      kind.schedule(delay, target, data);
+    };
+    expect(scheduling(-1, 0, 0)).toThrow(simulationError('NEGATIVE_DELAY'));
+    expect(scheduling(Number.NaN, 0, 0)).toThrow(simulationError('NOT_A_NUMBER'));
+    expect(scheduling(Infinity, 0, 0)).toThrow(simulationError('NOT_FINITE'));
     for (const number of [0.5, 2 ** 31, -(2 ** 31) - 1, Number.NaN]) {
-      expect(() => kind.schedule(1, number, 0)).toThrow(simulationError('INVALID_ARGUMENT'));
-      expect(() => kind.schedule(1, 0, number)).toThrow(simulationError('INVALID_ARGUMENT'));
+      expect(scheduling(1, number, 0)).toThrow(simulationError('INVALID_ARGUMENT'));
+      expect(scheduling(1, 0, number)).toThrow(simulationError('INVALID_ARGUMENT'));
     }
-    expect(() => kind.schedule(1, 2 ** 31 - 1, -(2 ** 31))).not.toThrow();
+    expect(scheduling(1, 2 ** 31 - 1, -(2 ** 31))).not.toThrow();
     expect(sim.pendingEvents).toBe(1);
   });
 

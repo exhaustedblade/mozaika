@@ -5,7 +5,8 @@
  *
  * It is shared by the modules of the kernel — the run loop, processes,
  * signals, agents — and is not part of the package's API: model code
- * schedules events through Simulation.
+ * schedules events through Simulation, and packages built on the kernel
+ * register kinds of their own through extension.ts.
  */
 import type { EventInfo, EventQueue } from './event-queue.js';
 import { EventRecords } from './event-records.js';
@@ -19,7 +20,7 @@ import { WakeUps } from './wake-ups.js';
  * numbers for its kind, `target` and `data`; what they mean is up to the kind,
  * e.g. the place of an agent in its population and the number of its timer.
  */
-export interface EventKind {
+export interface EventKindHandler {
   /**
    * Fires an event. If it fails, throws a SimulationError that names what
    * failed: EVENT_FAILED, PROCESS_FAILED or AGENT_FAILED.
@@ -43,7 +44,8 @@ export class Scheduler {
   readonly wakeUps: WakeUps;
   readonly #records = new EventRecords();
   readonly #queue: EventQueue = new FourAryHeap(this.#records);
-  readonly #kinds: EventKind[] = [];
+  /** The handler of each kind of events, by kind number. */
+  readonly #kinds: EventKindHandler[] = [];
   #nextSeq = 0;
 
   constructor(startTime: number) {
@@ -62,12 +64,12 @@ export class Scheduler {
     return this.#queue.firstTime();
   }
 
-  /** Adds a kind of events and returns its number, which events of the kind carry. */
-  registerKind(kind: EventKind): number {
+  /** Adds a kind of events with its handler and returns its number, which events of the kind carry. */
+  registerKind(handler: EventKindHandler): number {
     if (this.#kinds.length === MAX_KINDS) {
       throw new Error(`Scheduler: more than ${String(MAX_KINDS)} kinds of events`);
     }
-    return this.#kinds.push(kind) - 1;
+    return this.#kinds.push(handler) - 1;
   }
 
   /**
@@ -127,7 +129,7 @@ export class Scheduler {
     kind.fire(target, data);
   }
 
-  #kindOf(slot: number): EventKind {
+  #kindOf(slot: number): EventKindHandler {
     const kind = this.#kinds[this.#records.kind(slot)];
     if (kind === undefined) throw new Error(`Scheduler: slot ${String(slot)} has no kind of event`);
     return kind;

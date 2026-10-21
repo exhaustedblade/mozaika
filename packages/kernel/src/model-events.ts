@@ -5,10 +5,10 @@
  */
 import { eventFailure } from './errors.js';
 import type { EventHandle } from './event-queue.js';
-import type { EventKind, Scheduler } from './scheduler.js';
+import type { EventKindHandler, Scheduler } from './scheduler.js';
 import { SlotPool } from './slot-pool.js';
 
-export class ModelEvents implements EventKind {
+export class ModelEvents implements EventKindHandler {
   readonly #scheduler: Scheduler;
   readonly #kind: number;
   /** Rows of the table; an event carries its row as `data`. */

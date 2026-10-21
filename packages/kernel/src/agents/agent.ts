@@ -26,8 +26,20 @@ const CHECK_EVENT: AgentEvent = Object.freeze({ type: 'agent.check' });
  */
 const MAX_EVENTLESS_TRANSITIONS = 1000;
 
-/** The place of an agent that has been removed from its population. */
-export const REMOVED = -1;
+/**
+ * The place of a removed agent: −1 − the code of the state it was removed in.
+ * Negative, so it is never a row of the columns, and it keeps the state the
+ * agent still reports (П-35) without a table of removed agents: a WeakMap
+ * entry per removal grew with every agent that passed a Sink.
+ */
+export function removedPlace(stateCode: number): number {
+  return -1 - stateCode;
+}
+
+/** The state code kept in the place of a removed agent; see removedPlace. */
+function stateCodeOfRemoved(place: number): number {
+  return -1 - place;
+}
 
 /**
  * What an agent's population does with it beyond the public API. These need
@@ -46,7 +58,7 @@ export interface AgentFriend {
    * it is taking one; returns false if it was already removed or leaving.
    */
   remove<TContext extends object>(agent: Agent<TContext>): boolean;
-  /** Sets the agent's place in the columns: another agent's removal moved it, or it was removed (REMOVED). */
+  /** Sets the agent's place: a row of the columns after another agent's removal moved it, or removedPlace(). */
   moveTo<TContext extends object>(agent: Agent<TContext>, index: number): void;
 }
 
@@ -58,7 +70,7 @@ export interface AgentFriend {
 export let agentFriend: AgentFriend;
 
 export class Agent<TContext extends object = object> {
-  /** Number in the population: 1, 2, 3… in the order of creation, never reused. */
+  /** Number in the population: 1, 2, 3… in the order of creation unless given at creation; never reused. */
   readonly id: number;
   /** Model time at which the agent was created. */
   readonly createdAt: number;
@@ -66,9 +78,9 @@ export class Agent<TContext extends object = object> {
   readonly context: TContext;
   readonly #store: AgentStore<TContext>;
   /**
-   * Place in the population's columns, or REMOVED. It changes when the
-   * population removes another agent and moves this one into its place, so
-   * every access to the columns reads it anew.
+   * Place in the population's columns, or removedPlace() of its last state.
+   * It changes when the population removes another agent and moves this one
+   * into its place, so every access to the columns reads it anew.
    */
   #index: number;
   /** True while the agent takes a step: its own check() then waits for the end of the step, and so does its removal. */
@@ -93,10 +105,10 @@ export class Agent<TContext extends object = object> {
    * Use population.add(). The agent joins the population and enters its
    * initial state at once, inside the constructor, without an event.
    */
-  constructor(store: AgentStore<TContext>, context: TContext) {
+  constructor(store: AgentStore<TContext>, context: TContext, id: number) {
     this.#store = store;
     this.context = context;
-    this.id = store.nextId;
+    this.id = id;
     this.createdAt = store.simulation.now;
     this.#index = store.add(this);
     this.#start();
@@ -118,7 +130,7 @@ export class Agent<TContext extends object = object> {
 
   /** True once the agent has been removed from its population: it no longer reacts to anything. */
   get removed(): boolean {
-    return this.#index === REMOVED;
+    return this.#index < 0;
   }
 
   /**
@@ -143,9 +155,14 @@ export class Agent<TContext extends object = object> {
   }
 
   #start(): void {
+    const initial = this.#store.statechart.initial;
+    // The store has made the initial state current already. A state with no
+    // entry actions, timers or conditions has nothing more to run, so the step
+    // and its arguments are skipped: simple entities of the blocks start so.
+    if (initial.entry.length === 0 && initial.after.length === 0 && initial.always.length === 0) return;
     const args = this.#beginStep(START_EVENT);
     try {
-      this.#enter(this.#store.statechart.initial, args);
+      this.#enter(initial, args);
       this.#settle(args);
     } catch (error) {
       throw this.#failure(error);
@@ -264,7 +281,8 @@ export class Agent<TContext extends object = object> {
   }
 
   #currentState(): StateNode<TContext> {
-    return this.removed ? this.#store.removedStateOf(this) : this.#store.stateAt(this.#index);
+    const place = this.#index;
+    return place < 0 ? this.#store.stateWithCode(stateCodeOfRemoved(place)) : this.#store.stateAt(place);
   }
 
   #failure(error: unknown): SimulationError {

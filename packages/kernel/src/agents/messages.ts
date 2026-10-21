@@ -7,12 +7,12 @@
  * whether the agent itself has been removed.
  */
 import { DEFAULT_PRIORITY } from '../event-queue.js';
-import type { EventKind, Scheduler } from '../scheduler.js';
+import type { EventKindHandler, Scheduler } from '../scheduler.js';
 import { SlotPool } from '../slot-pool.js';
 import { type Agent, agentFriend } from './agent.js';
 import type { AgentEvent } from './definition.js';
 
-export class AgentMessages<TContext extends object> implements EventKind {
+export class AgentMessages<TContext extends object> implements EventKindHandler {
   readonly #scheduler: Scheduler;
   readonly #kind: number;
   /** Name of the population, for labels. */
