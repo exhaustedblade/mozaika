@@ -152,7 +152,7 @@ describe('Service', () => {
     const source = new Source(sim, { name: 'arrivals', interval: 1, limit: 1 });
     source.connect(new Service(sim, { name: 'desk', pool, duration: 1 }));
     expect(() => sim.run()).toThrow(
-      simulationError('PROCESS_FAILED', {
+      simulationError('EVENT_FAILED', {
         cause: simulationError('INVALID_STATE', { message: containing('"desk"') }),
       }),
     );

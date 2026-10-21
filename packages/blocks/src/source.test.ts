@@ -1,7 +1,7 @@
-import { Random, Simulation } from '@mozaika/kernel';
+import { type Agent, AgentPopulation, defineStatechart, Random, Simulation } from '@mozaika/kernel';
 import { describe, expect, it } from 'vitest';
 
-import { Delay, Entity, ResourcePool, Service, Sink, Source } from './index.js';
+import { Delay, type EntityFactory, ResourcePool, Service, Sink, Source } from './index.js';
 import { containing, Recorder, simulationError } from './test-support/helpers.js';
 
 describe('Source', () => {
@@ -75,58 +75,111 @@ describe('Source', () => {
   });
 
   it('makes each entity with its factory, given the id and the creation time', () => {
-    class Customer extends Entity {
-      readonly vip: boolean;
-      constructor(id: number, createdAt: number) {
-        super(id, createdAt);
-        this.vip = id % 2 === 0;
-      }
-    }
     const sim = new Simulation();
+    const customer = defineStatechart({ initial: 'in', context: { vip: false }, states: { in: {} } });
+    const customers = new AgentPopulation(sim, { name: 'customers', statechart: customer });
+    const given: [number, number][] = [];
     const source = new Source(sim, {
       name: 'arrivals',
       interval: 2,
       limit: 3,
-      entity: (id, createdAt) => new Customer(id, createdAt),
+      entity: (id, createdAt) => {
+        given.push([id, createdAt]);
+        return customers.add({ vip: id % 2 === 0 });
+      },
     });
     const recorder = source.connect(new Recorder(sim));
     sim.run();
-    expect(recorder.entities.map((entity) => entity instanceof Customer && entity.vip)).toEqual([false, true, false]);
+    expect(given).toEqual([
+      [1, 2],
+      [2, 4],
+      [3, 6],
+    ]);
+    expect(recorder.entities.map((entity) => (entity.context as { vip: boolean }).vip)).toEqual([false, true, false]);
+    expect(recorder.entities.every((entity) => entity.population === customers)).toBe(true);
     expect(recorder.visits).toEqual([
       { id: 1, time: 2 },
       { id: 2, time: 4 },
       { id: 3, time: 6 },
     ]);
+    // With a factory, the source has no population of its own.
+    expect(source.population).toBeUndefined();
   });
 
   it('calls the factory only for arrivals that get in; lost ones still use up their ids', () => {
     const sim = new Simulation();
+    const tickets = new AgentPopulation(sim, { name: 'tickets', statechart: defineStatechart({ initial: 'a', states: { a: {} } }) });
     const made: number[] = [];
     const source = new Source(sim, {
       name: 'arrivals',
       interval: 1,
       limit: 6,
-      entity: (id, createdAt) => {
+      entity: (id) => {
         made.push(id);
-        return new Entity(id, createdAt);
+        return tickets.add({}, { id });
       },
     });
     // The same booth as in the test above: arrivals 1 and 4 get in.
-    source.connect(new Delay(sim, { name: 'booth', duration: 2.5, capacity: 1 })).connect(new Recorder(sim));
+    const recorder = source.connect(new Delay(sim, { name: 'booth', duration: 2.5, capacity: 1 })).connect(new Recorder(sim));
     sim.run();
     expect(made).toEqual([1, 4]);
+    expect(recorder.ids).toEqual([1, 4]);
     expect(source.lost).toBe(4);
   });
 
-  it('fails when the factory does not return an entity', () => {
+  it('makes agents of its own population by default, numbered by arrival across all sources', () => {
     const sim = new Simulation();
-    const source = new Source(sim, { name: 'arrivals', interval: 1, entity: () => undefined as unknown as Entity });
-    source.connect(new Recorder(sim));
-    expect(() => sim.run()).toThrow(
-      simulationError('PROCESS_FAILED', {
-        cause: simulationError('INVALID_ARGUMENT', { message: containing('entity factory') }),
-      }),
+    const recorder = new Recorder(sim);
+    const morning = new Source(sim, { name: 'morning', interval: 2, limit: 2 }); // 2, 4
+    const evening = new Source(sim, { name: 'evening', interval: 3, limit: 2 }); // 3, 6
+    morning.connect(recorder);
+    evening.connect(recorder);
+    sim.run();
+    expect(recorder.visits).toEqual([
+      { id: 1, time: 2 },
+      { id: 2, time: 3 },
+      { id: 3, time: 4 },
+      { id: 4, time: 6 },
+    ]);
+    expect(recorder.entities.map((agent) => agent.population.name)).toEqual(['morning', 'evening', 'morning', 'evening']);
+    expect([...(morning.population?.ids() ?? [])]).toEqual([1, 3]);
+    expect([...(evening.population?.ids() ?? [])]).toEqual([2, 4]);
+    expect(recorder.entities.map((agent) => agent.createdAt)).toEqual([2, 3, 4, 6]);
+  });
+
+  it('gives simple entities no fields: they share one empty, frozen context', () => {
+    const sim = new Simulation();
+    const source = new Source(sim, { name: 'arrivals', interval: 1, limit: 2 });
+    const recorder = source.connect(new Recorder(sim));
+    sim.run();
+    const [first, second] = recorder.entities as [Agent, Agent];
+    expect(first.context).toEqual({});
+    expect(Object.isFrozen(first.context)).toBe(true);
+    expect(second.context).toBe(first.context);
+  });
+
+  it('refuses a population name that the model already uses, and keeps its block name free', () => {
+    const sim = new Simulation();
+    new AgentPopulation(sim, { name: 'customers', statechart: defineStatechart({ initial: 'a', states: { a: {} } }) });
+    expect(() => new Source(sim, { name: 'customers', interval: 1 })).toThrow(
+      simulationError('INVALID_ARGUMENT', { message: containing('"customers"') }),
     );
+    expect(() => new Sink(sim, { name: 'customers' })).not.toThrow();
+  });
+
+  it('fails when the factory does not return an agent of the simulation', () => {
+    const other = new Simulation();
+    const strangers = new AgentPopulation(other, { name: 'strangers', statechart: defineStatechart({ initial: 'a', states: { a: {} } }) });
+    for (const entity of [() => undefined as unknown as Agent, () => ({ id: 1, createdAt: 0 }) as unknown as Agent, () => strangers.add()]) {
+      const sim = new Simulation();
+      const source = new Source(sim, { name: 'arrivals', interval: 1, entity });
+      source.connect(new Recorder(sim));
+      expect(() => sim.run()).toThrow(
+        simulationError('EVENT_FAILED', {
+          cause: simulationError('INVALID_ARGUMENT', { message: containing('entity factory') }),
+        }),
+      );
+    }
   });
 
   it('stops after the limit and creates nothing for a limit of zero', () => {
@@ -135,7 +188,7 @@ describe('Source', () => {
     silent.connect(new Recorder(sim));
     const { events } = sim.run(100);
     expect(silent.arrivals).toBe(0);
-    expect(events).toBe(1); // only the start of the source process
+    expect(events).toBe(1); // only the start of the source
   });
 
   it('refuses invalid options', () => {
@@ -145,7 +198,7 @@ describe('Source', () => {
     expect(() => new Source(sim, { name: 'b', interval: Number.NaN })).toThrow(simulationError('NOT_A_NUMBER'));
     expect(() => new Source(sim, { name: 'c', interval: 1, limit: 2.5 })).toThrow(simulationError('INVALID_ARGUMENT'));
     expect(() => new Source(sim, { name: 'd', interval: 1, limit: -1 })).toThrow(simulationError('INVALID_ARGUMENT'));
-    expect(() => new Source(sim, { name: 'e', interval: 1, entity: 'customer' as unknown as () => Entity })).toThrow(
+    expect(() => new Source(sim, { name: 'e', interval: 1, entity: 'customer' as unknown as EntityFactory })).toThrow(
       simulationError('INVALID_ARGUMENT'),
     );
   });
@@ -155,7 +208,7 @@ describe('Source', () => {
     const source = new Source(sim, { name: 'arrivals', interval: () => -1 });
     source.connect(new Recorder(sim));
     expect(() => sim.run()).toThrow(
-      simulationError('PROCESS_FAILED', {
+      simulationError('EVENT_FAILED', {
         cause: simulationError('NEGATIVE_DELAY', { message: containing('"arrivals"') }),
       }),
     );
@@ -165,7 +218,7 @@ describe('Source', () => {
     const sim = new Simulation();
     new Source(sim, { name: 'arrivals', interval: 1 });
     expect(() => sim.run()).toThrow(
-      simulationError('PROCESS_FAILED', {
+      simulationError('EVENT_FAILED', {
         cause: simulationError('INVALID_STATE', { message: containing('"arrivals"') }),
       }),
     );
