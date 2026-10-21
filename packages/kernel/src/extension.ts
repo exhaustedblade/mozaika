@@ -65,9 +65,11 @@ export class EventKind {
    * integers, such as the row of an entity in a block's table.
    */
   schedule(delay: number, target: number, data: number): void {
-    requireDelay(delay, 'EventKind schedule() delay');
-    requireInt32(target, 'EventKind schedule() target');
-    requireInt32(data, 'EventKind schedule() data');
+    // One cheap test for the usual case, which runs on every event; the checks
+    // that name the problem run only when it fails.
+    const valid =
+      typeof delay === 'number' && delay >= 0 && delay < Infinity && (target | 0) === target && (data | 0) === data;
+    if (!valid) refuseEvent(delay, target, data);
     const scheduler = this.#scheduler;
     scheduler.add(scheduler.now + delay, DEFAULT_PRIORITY, this.#kind, target, data);
   }
@@ -111,6 +113,14 @@ function requireHandler(handler: unknown): EventHandler {
     throw new SimulationError('INVALID_ARGUMENT', 'EventKind handler must have the methods fire() and label()');
   }
   return handler as EventHandler;
+}
+
+/** Throws the error that says what is wrong with an event schedule() refused. */
+function refuseEvent(delay: number, target: number, data: number): never {
+  requireDelay(delay, 'EventKind schedule() delay');
+  requireInt32(target, 'EventKind schedule() target');
+  requireInt32(data, 'EventKind schedule() data');
+  throw new Error('EventKind: an event was refused without a reason');
 }
 
 /** The records keep `target` and `data` in Int32Array columns, which would silently cut anything else. */

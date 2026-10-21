@@ -1,7 +1,7 @@
 /**
  * Speed of the blocks: the M/M/1 model built from blocks, Source → Service →
- * Sink, at ρ = 0.9 — about one million kernel events per run. Prints a
- * Markdown table, which CI also puts into the job summary, below the kernel's.
+ * Sink, at ρ = 0.9. Prints a Markdown table, which CI also puts into the job
+ * summary, below the kernel's.
  *
  * It measures the built packages (dist), as other packages run them. As in
  * the kernel benchmark, the threshold is deliberately low: a slow CI machine
@@ -14,9 +14,12 @@ import { Simulation } from '@mozaika/kernel';
 
 const UTILIZATION = 0.9;
 /**
- * Arrivals per run. Each takes about 3.9 kernel events: the arrival, the start
- * of the entity's process, the wake-up after waiting for the server (90 % of
- * entities wait) and the end of service. So 256 000 arrivals make about a million events.
+ * Arrivals per run. Each takes about 2.9 kernel events: the arrival, the grant
+ * of the server to the 90 % of entities that wait for it, and the end of
+ * service — about 744 000 events in all. Before Ф0-4в, the blocks ran a
+ * process per entity, whose start was one more event, so the same model made
+ * a million. The table therefore also shows entities per second, which does
+ * not depend on how many events an entity takes.
  */
 const ARRIVALS = 256_000;
 const RUNS = 5;
@@ -70,17 +73,20 @@ const report = [
   '',
   '### Скорость блоков',
   '',
-  tableRow('Сценарий', 'Событий', 'Время, мс', 'Событий в секунду'),
-  tableRow('---', '---:', '---:', '---:'),
+  tableRow('Сценарий', 'Событий', 'Время, мс', 'Событий в секунду', 'Сущностей в секунду'),
+  tableRow('---', '---:', '---:', '---:', '---:'),
   tableRow(
     'M/M/1 на блоках, ρ = 0,9 (Source → Service → Sink)',
     number.format(events),
     number.format(milliseconds),
     number.format(eventsPerSecond),
+    number.format((ARRIVALS / milliseconds) * 1000),
   ),
   '',
-  `Медиана из ${String(RUNS)} прогонов после разогрева. ` +
+  `${number.format(ARRIVALS)} приходов. Медиана из ${String(RUNS)} прогонов после разогрева. ` +
     `Порог: не меньше ${number.format(MIN_EVENTS_PER_SECOND)} событий в секунду.`,
+  'С Ф0-4в на сущность приходится около 2,9 события вместо 3,9: у неё больше нет своего процесса, ' +
+    'поэтому та же модель даёт меньше событий, а скорость модели лучше видна в сущностях в секунду.',
 ];
 if (tooSlow) report.push('', '**Ниже порога.**');
 console.log(report.join('\n'));
