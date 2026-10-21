@@ -15,6 +15,7 @@ import { describeValue, messageOf, requireFinite, SimulationError } from '../err
 import { AgentPopulation } from '../agents/population.js';
 import { type PopulationSnapshot, PopulationSnapshots } from '../agents/population-snapshots.js';
 import { Simulation } from '../simulation.js';
+import type { SnapshotRecorder } from '../snapshots.js';
 import type {
   BuildRequest,
   KernelAnswer,
@@ -22,6 +23,7 @@ import type {
   KernelRequest,
   ModelDefinition,
   ReleaseRequest,
+  RunRequest,
   SetRequest,
 } from './protocol.js';
 
@@ -33,6 +35,8 @@ interface BuiltModel {
   readonly parameters: Record<string, number>;
   /** The snapshots of each population, in the order the model gave them. */
   readonly snapshots: readonly PopulationSnapshots[];
+  /** The model's records for charts, if it keeps any. */
+  readonly records: SnapshotRecorder | undefined;
 }
 
 export class KernelHost {
@@ -61,10 +65,8 @@ export class KernelHost {
     switch (request.type) {
       case 'build':
         return withoutTransfer(this.#build(request));
-      case 'run': {
-        const { time, events, reason } = this.#model().simulation.run(request.until);
-        return withoutTransfer({ type: 'ran', id: request.id, time, events, reason });
-      }
+      case 'run':
+        return withoutTransfer(this.#run(request));
       case 'snapshot': {
         const model = this.#model();
         const populations = takeSnapshots(model.snapshots);
@@ -99,7 +101,7 @@ export class KernelHost {
       parameters[requireParameterName(parameters, name, request.model)] = requireFinite(value, `Parameter "${name}"`);
     }
     const simulation = new Simulation({ seed: request.seed ?? 0 });
-    const { populations } = definition.build({ simulation, parameters });
+    const { populations, records } = definition.build({ simulation, parameters });
     for (const population of populations) {
       if (!(population instanceof AgentPopulation) || population.simulation !== simulation) {
         throw new SimulationError(
@@ -109,7 +111,7 @@ export class KernelHost {
       }
     }
     const snapshots = populations.map((population) => new PopulationSnapshots(population));
-    this.#built = { name: request.model, simulation, parameters, snapshots };
+    this.#built = { name: request.model, simulation, parameters, snapshots, records };
     return {
       type: 'built',
       id: request.id,
@@ -117,6 +119,14 @@ export class KernelHost {
       parameters: { ...parameters },
       populations: populations.map(({ name, statechart }) => ({ name, stateNames: statechart.stateNames })),
     };
+  }
+
+  /** Runs the model to the moment asked for; the reply brings the records taken on the way. */
+  #run(request: RunRequest): KernelReply {
+    const model = this.#model();
+    const { time, events, reason } = model.simulation.run(request.until);
+    const ran = { type: 'ran', id: request.id, time, events, reason } as const;
+    return model.records === undefined ? ran : { ...ran, records: model.records.take() };
   }
 
   #set(request: SetRequest): KernelReply {

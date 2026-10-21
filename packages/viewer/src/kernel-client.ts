@@ -11,6 +11,18 @@ import type {
   SnapshotReply,
 } from '@mozaika/kernel/worker';
 
+/**
+ * A reply as the viewer's worker posts it: the kernel's reply and the time
+ * the worker took to handle the request (worker-answer.ts). The kernel reads
+ * no clock, so the worker's script measures it.
+ */
+export type Timed<T extends KernelReply> = T & {
+  /** Milliseconds the kernel spent on the request in the worker, by the worker's clock. */
+  readonly workerMilliseconds: number;
+};
+
+export type TimedReply = Timed<KernelReply>;
+
 /** A request without its number: the client numbers requests itself. */
 type Request = KernelRequest extends infer R ? (R extends KernelRequest ? Omit<R, 'id'> : never) : never;
 
@@ -28,12 +40,12 @@ export class KernelError extends Error {
 /** What the client needs of a worker: the part of Worker it uses, so tests can stand in for one. */
 export interface WorkerPort {
   postMessage(message: KernelRequest, options: { transfer: Transferable[] }): void;
-  onmessage: ((event: MessageEvent<KernelReply>) => void) | null;
+  onmessage: ((event: MessageEvent<TimedReply>) => void) | null;
 }
 
 export class KernelClient {
   readonly #worker: WorkerPort;
-  readonly #waiting = new Map<number, (reply: KernelReply) => void>();
+  readonly #waiting = new Map<number, (reply: TimedReply) => void>();
   #nextId = 1;
 
   constructor(worker: WorkerPort) {
@@ -45,18 +57,19 @@ export class KernelClient {
     };
   }
 
-  build(model: string, seed: number, parameters?: ModelParameters): Promise<BuiltReply> {
+  build(model: string, seed: number, parameters?: ModelParameters): Promise<Timed<BuiltReply>> {
     const request: Request =
       parameters === undefined ? { type: 'build', model, seed } : { type: 'build', model, seed, parameters };
     return this.#ask(request, 'built');
   }
 
-  run(until: number): Promise<RanReply> {
+  /** Runs the model to `until`; the reply brings the model's records taken on the way, if it keeps any. */
+  run(until: number): Promise<Timed<RanReply>> {
     return this.#ask({ type: 'run', until }, 'ran');
   }
 
   /** A snapshot of every population; give it back with release() once drawn. */
-  snapshot(): Promise<SnapshotReply> {
+  snapshot(): Promise<Timed<SnapshotReply>> {
     return this.#ask({ type: 'snapshot' }, 'snapshot');
   }
 
@@ -74,12 +87,12 @@ export class KernelClient {
     request: Request,
     expected: T,
     transfer: Transferable[] = [],
-  ): Promise<Extract<KernelReply, { type: T }>> {
+  ): Promise<Timed<Extract<KernelReply, { type: T }>>> {
     const id = this.#nextId++;
     return new Promise((resolve, reject) => {
       this.#waiting.set(id, (reply) => {
         if (reply.type === expected) {
-          resolve(reply as Extract<KernelReply, { type: T }>);
+          resolve(reply as Timed<Extract<KernelReply, { type: T }>>);
         } else if (reply.type === 'error') {
           reject(new KernelError(reply.code, reply.message));
         } else {

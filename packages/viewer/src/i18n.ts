@@ -31,6 +31,27 @@ const ru = {
   resume: 'Продолжить',
   restart: 'Заново',
   motionError: 'Ядро остановилось с ошибкой:',
+  benchTitle: 'Замер сцены',
+  benchAbout:
+    'Ядро в Web Worker ведёт толпу, которая не останавливается: каждый идёт к случайной точке площади. Видеокарта рисует всех инстансингом и сама ведёт по отрезкам из снимков ядра. Первые 3 секунды — разогрев, потом 10 секунд замера.',
+  benchAgents: 'Агентов',
+  benchEngine: '3D-движок',
+  benchRenderer: 'Видеокарта',
+  benchProgressWarmUp: 'разогрев…',
+  benchProgressMeasuring: 'замер…',
+  benchProgressDone: 'готово',
+  benchFps: 'Кадров в секунду',
+  benchFrameInterval: 'Интервал кадров, мс (медиана / 95 %)',
+  benchFrameWork: 'Работа кадра в главном потоке, мс',
+  benchSnapshot: 'Снимок в Worker, мс',
+  benchRun: 'Прогон ядра до кадра в Worker, мс',
+  benchUpload: 'Загрузка снимка на видеокарту, мс',
+  benchSnapshotsPerSecond: 'Снимков в секунду',
+  benchCopy: 'Скопировать итог',
+  benchCopied: 'Скопировано',
+  benchBack: 'На главную',
+  noWebgl:
+    'Этот браузер не умеет WebGL 2, поэтому 3D-сцену показать нельзя. Обновите браузер или включите аппаратное ускорение графики в его настройках.',
 };
 
 export type Messages = Readonly<Record<keyof typeof ru, string>>;
@@ -62,6 +83,27 @@ const en: Messages = {
   resume: 'Resume',
   restart: 'Restart',
   motionError: 'The kernel stopped with an error:',
+  benchTitle: 'Scene benchmark',
+  benchAbout:
+    'The kernel in a Web Worker drives a crowd that never stops: each person walks to a random point of the square. The graphics card draws them all by instancing and leads them along the segments of the kernel’s snapshots itself. The first 3 seconds warm up, then 10 seconds are measured.',
+  benchAgents: 'Agents',
+  benchEngine: '3D engine',
+  benchRenderer: 'Graphics card',
+  benchProgressWarmUp: 'warming up…',
+  benchProgressMeasuring: 'measuring…',
+  benchProgressDone: 'done',
+  benchFps: 'Frames per second',
+  benchFrameInterval: 'Frame interval, ms (median / 95 %)',
+  benchFrameWork: 'Frame work on the main thread, ms',
+  benchSnapshot: 'Snapshot in the worker, ms',
+  benchRun: 'Kernel run to the frame in the worker, ms',
+  benchUpload: 'Snapshot upload to the graphics card, ms',
+  benchSnapshotsPerSecond: 'Snapshots per second',
+  benchCopy: 'Copy the result',
+  benchCopied: 'Copied',
+  benchBack: 'Home',
+  noWebgl:
+    'This browser has no WebGL 2, so the 3D scene cannot be shown. Update the browser or turn on hardware acceleration of graphics in its settings.',
 };
 
 export const MESSAGES: Readonly<Record<Locale, Messages>> = { ru, en };

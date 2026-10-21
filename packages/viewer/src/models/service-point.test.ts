@@ -12,7 +12,6 @@ import { beforeAll, describe, expect, it } from 'vitest';
 
 import {
   buildServicePoint,
-  EXIT_MINUTES,
   SERVICE_POINT_DEFAULTS,
   servicePoint,
   type ServicePointParameters,
@@ -23,7 +22,7 @@ import { checkLaws } from './service-point-laws.js';
 
 /**
  * The demo "service point" (Ф0-6б): Source → Queue → Service with a pool of
- * windows → Delay (the way out) → Sink, on the blocks, with people that walk.
+ * windows → Sink, on the blocks, with people that walk in, to the windows and out.
  * The tests check what the scene shows (the places of the line, the windows,
  * the way out), the laws of the model on every record (its self-check), and
  * the M/M/c formulas, as the tests of the blocks do.
@@ -77,7 +76,8 @@ describe.each(SCENARIOS)('service point: $name', ({ parameters }) => {
   it('has people walk to the places of the line, to free windows and out, as the blocks move them', () => {
     const model = buildServicePoint(new Simulation({ seed: SEED }), parameters);
     const snapshots = new PopulationSnapshots(model.people);
-    const stateNames = model.people.statechart.stateNames;
+    // A person in the last state, gone, is no longer in the population.
+    const stateNames = model.people.statechart.stateNames.filter((state) => state !== 'gone');
     const open = Array.from({ length: parameters.windows }, (_, window) => inFloat32(windowSpot(window)));
     const seen = new Set<string>();
     for (let time = 0.5; time <= 240; time += 0.5) {
@@ -152,25 +152,25 @@ describe('service point laws', () => {
 /**
  * M/M/c on the demo: with exponential times between arrivals and of service,
  * the line and the windows are an M/M/c queue, whatever the people do on the
- * way; the way out adds a constant to the time in the system. Replication and
- * deletion as in the tests of the blocks (packages/blocks/src/mmc.test.ts).
+ * way. Replication and deletion as in the tests of the blocks
+ * (packages/blocks/src/mmc.test.ts).
  */
 describe('service point against M/M/c', () => {
   const parameters = SERVICE_POINT_DEFAULTS;
   const runLength: RunLength = { warmUp: 1_000, window: 30_000 };
 
   function replication(random: Random): ReplicationEstimates {
-    const { simulation, line, service, windows, exit, sink } = buildServicePoint(new Simulation({ random }), parameters);
+    const { simulation, line, service, windows, out } = buildServicePoint(new Simulation({ random }), parameters);
     simulation.run(runLength.warmUp);
-    for (const block of [line, service, windows, exit, sink]) block.resetStatistics();
+    for (const block of [line, service, windows, out]) block.resetStatistics();
     simulation.run(runLength.warmUp + runLength.window);
     return {
       inSystem: line.stats.length.mean + service.stats.content.mean,
       waiting: line.stats.length.mean,
-      timeInSystem: sink.stats.timeInSystem.mean - EXIT_MINUTES,
+      timeInSystem: out.stats.timeInSystem.mean,
       waitTime: line.stats.waitTime.mean,
       utilization: windows.utilization,
-      throughput: sink.stats.timeInSystem.count / runLength.window,
+      throughput: out.stats.timeInSystem.count / runLength.window,
       lossFraction: 0,
     };
   }
