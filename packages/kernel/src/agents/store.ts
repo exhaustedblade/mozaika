@@ -21,6 +21,11 @@ const INITIAL_CAPACITY = 1024;
 /** A cell of the timer column without a pending timeout. */
 const NO_EVENT = -1;
 
+/** Numbers per row of the identity column, and their places: the agent's id and its creation time. */
+const IDENTITY_WIDTH = 2;
+const ID = 0;
+const CREATED_AT = 1;
+
 /**
  * The agents of one population and their columns (docs/AGENTS.md, section 6;
  * П-30): row i holds the agent's id, its state code, its creation time and
@@ -45,14 +50,15 @@ export class AgentStore<TContext extends object> {
   readonly #timeoutKind: number;
   readonly #messages: AgentMessages<TContext>;
   readonly #agents: Agent<TContext>[] = [];
-  #ids = new Float64Array(INITIAL_CAPACITY);
-  #codes = new Uint16Array(INITIAL_CAPACITY);
   /**
-   * The creation time of each agent (П-42, П-46). As a field of the agent, a
-   * fractional time took a number object of its own: 12 bytes and a cache
-   * miss when a Sink reads it.
+   * The id and the creation time of each agent, side by side (П-42, П-46).
+   * As a field of the agent, a fractional creation time took a number object
+   * of its own, 12 bytes. Here a Sink reads it as the agent leaves, and the
+   * removal then writes the id of the agent moved into the row at the same
+   * place: one line of the processor's cache for both rather than two.
    */
-  #createdAt = new Float64Array(INITIAL_CAPACITY);
+  #identities = new Float64Array(INITIAL_CAPACITY * IDENTITY_WIDTH);
+  #codes = new Uint16Array(INITIAL_CAPACITY);
   /** Room in each row for the timeouts of one state: the most any state of the statechart has. */
   readonly #timersPerRow: number;
   /** Slots of the pending timeouts, #timersPerRow cells per row; NO_EVENT where there is none. */
@@ -119,11 +125,11 @@ export class AgentStore<TContext extends object> {
   /** Adds a row for an agent created now, in the initial state, and returns its place. */
   add(agent: Agent<TContext>): number {
     const index = this.#agents.length;
-    if (index === this.#ids.length) this.#grow();
+    if (index === this.#codes.length) this.#grow();
     this.#agents.push(agent);
     this.#lastId = agent.id;
-    this.#ids[index] = agent.id;
-    this.#createdAt[index] = this.#scheduler.now;
+    this.#identities[index * IDENTITY_WIDTH + ID] = agent.id;
+    this.#identities[index * IDENTITY_WIDTH + CREATED_AT] = this.#scheduler.now;
     this.#motion?.clearRow(index);
     const code = this.statechart.initial.code;
     this.#codes[index] = code;
@@ -197,7 +203,7 @@ export class AgentStore<TContext extends object> {
 
   /** The creation time of the agent at `index`. */
   createdAtOf(index: number): number {
-    return this.#createdAt[index] ?? Number.NaN;
+    return this.#identities[index * IDENTITY_WIDTH + CREATED_AT] ?? Number.NaN;
   }
 
   /** Number of agents in the state with this code. */
@@ -207,7 +213,9 @@ export class AgentStore<TContext extends object> {
 
   /** A copy of the ids, in the order of the rows. */
   copyIds(): Float64Array {
-    return this.#ids.slice(0, this.#agents.length);
+    const ids = new Float64Array(this.#agents.length);
+    this.#writeIdentities(ids, undefined);
+    return ids;
   }
 
   /** A copy of the state codes, in the order of the rows. */
@@ -231,8 +239,7 @@ export class AgentStore<TContext extends object> {
    */
   writeSnapshot(ids: Float64Array, createdAt: Float64Array, segments: Float32Array, states: Uint16Array): void {
     const size = this.#agents.length;
-    ids.set(this.#ids.subarray(0, size));
-    createdAt.set(this.#createdAt.subarray(0, size));
+    this.#writeIdentities(ids, createdAt);
     states.set(this.#codes.subarray(0, size));
     if (this.#motion === undefined) {
       writeSegmentsAtOrigin(segments, size, this.#scheduler.now);
@@ -282,7 +289,7 @@ export class AgentStore<TContext extends object> {
 
   /** "<population>#<agent>: <state> after <key>" (П-29). */
   timerLabel(index: number, timerIndex: number): string {
-    return `${this.name}#${String(this.#ids[index])}${this.#timerLabels[timerIndex] ?? ''}`;
+    return `${this.name}#${String(this.#idOf(index))}${this.#timerLabels[timerIndex] ?? ''}`;
   }
 
   send(agent: Agent<TContext>, message: AgentEvent): void {
@@ -320,11 +327,25 @@ export class AgentStore<TContext extends object> {
 
   /** "<population>#<agent>: arrival" (П-29). */
   arrivalLabel(index: number): string {
-    return `${this.name}#${String(this.#ids[index])}: arrival`;
+    return `${this.name}#${String(this.#idOf(index))}: arrival`;
   }
 
   #timerCell(index: number, timerIndex: number): number {
     return index * this.#timersPerRow + (this.#timerCells[timerIndex] ?? 0);
+  }
+
+  #idOf(index: number): number {
+    return this.#identities[index * IDENTITY_WIDTH + ID] ?? Number.NaN;
+  }
+
+  /** Writes the ids, and the creation times if asked, of the agents in the order of the rows. */
+  #writeIdentities(ids: Float64Array, createdAt: Float64Array | undefined): void {
+    const identities = this.#identities;
+    const size = this.#agents.length;
+    for (let row = 0, cell = 0; row < size; row++, cell += IDENTITY_WIDTH) {
+      ids[row] = identities[cell + ID] ?? Number.NaN;
+      if (createdAt !== undefined) createdAt[row] = identities[cell + CREATED_AT] ?? Number.NaN;
+    }
   }
 
   #agentAt(index: number): Agent<TContext> {
@@ -337,7 +358,7 @@ export class AgentStore<TContext extends object> {
   #movement(): AgentMotion {
     if (this.#motion === undefined) {
       const arrivalKind = this.#scheduler.registerKind(new AgentArrivals(this));
-      this.#motion = new AgentMotion(this.#scheduler, arrivalKind, this.#ids.length);
+      this.#motion = new AgentMotion(this.#scheduler, arrivalKind, this.#codes.length);
     }
     return this.#motion;
   }
@@ -346,9 +367,8 @@ export class AgentStore<TContext extends object> {
   #moveRow(from: number, to: number): void {
     const agent = this.#agentAt(from);
     this.#agents[to] = agent;
-    this.#ids[to] = this.#ids[from] ?? 0;
+    this.#identities.copyWithin(to * IDENTITY_WIDTH, from * IDENTITY_WIDTH, (from + 1) * IDENTITY_WIDTH);
     this.#codes[to] = this.#codes[from] ?? 0;
-    this.#createdAt[to] = this.#createdAt[from] ?? 0;
     this.#motion?.moveRow(from, to);
     const width = this.#timersPerRow;
     for (let cell = 0; cell < width; cell++) {
@@ -361,10 +381,9 @@ export class AgentStore<TContext extends object> {
   }
 
   #grow(): void {
-    const capacity = this.#ids.length * 2;
-    this.#ids = grown(this.#ids, new Float64Array(capacity));
+    const capacity = this.#codes.length * 2;
+    this.#identities = grown(this.#identities, new Float64Array(capacity * IDENTITY_WIDTH));
     this.#codes = grown(this.#codes, new Uint16Array(capacity));
-    this.#createdAt = grown(this.#createdAt, new Float64Array(capacity));
     this.#motion?.grow(capacity);
     this.#timers = grown(this.#timers, new Int32Array(capacity * this.#timersPerRow).fill(NO_EVENT));
   }
