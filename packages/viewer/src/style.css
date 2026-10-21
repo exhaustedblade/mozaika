@@ -182,3 +182,357 @@ dd {
     grid-column: 1 / -1;
   }
 }
+
+/* Pages with a scene fill the window; their panels float over it. */
+body.full-screen {
+  overflow: hidden;
+}
+
+body.full-screen #app {
+  max-width: none;
+  height: 100vh;
+  padding: 0;
+}
+
+.scene-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+.bench-panel {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  width: min(26rem, calc(100% - 2rem));
+  max-height: calc(100% - 2rem);
+  overflow: auto;
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  box-shadow: 0 6px 24px rgb(0 0 0 / 12%);
+  font-size: 0.9rem;
+}
+
+.bench-panel h1 {
+  font-size: 1.4rem;
+}
+
+.bench-panel p {
+  margin: 0.5rem 0;
+  color: var(--muted);
+}
+
+.bench-panel nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.bench-panel a {
+  color: var(--accent);
+}
+
+.bench-panel a[aria-current='page'] {
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.bench-panel dl {
+  margin-top: 0.75rem;
+  padding-top: 0.5rem;
+}
+
+.bench-panel dl div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+}
+
+.bench-panel dt {
+  min-width: 0;
+}
+
+.bench-panel dd {
+  max-width: 14rem;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.bench-panel .bench-how-to {
+  color: var(--fg);
+}
+
+.bench-progress {
+  font-weight: 600;
+}
+
+.bench-panel pre {
+  max-height: 12rem;
+  overflow: auto;
+  font-size: 0.75rem;
+}
+
+.bench-panel button {
+  padding: 0.35rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.scene-unavailable {
+  max-width: 36rem;
+  margin: 6rem auto 0;
+  padding: 1rem 1.25rem;
+  border: 1px solid #c0392b;
+  border-radius: 8px;
+  color: #c0392b;
+}
+
+/* The demo: the scene on the left, the panel on the right; on a narrow screen, the panel below. */
+body.full-screen #app.demo {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(20rem, 26rem);
+  height: 100vh;
+}
+
+.demo-scene {
+  position: relative;
+  min-height: 0;
+}
+
+.demo-panel {
+  overflow-y: auto;
+  padding: 1rem 1.25rem 2rem;
+  border-left: 1px solid var(--border);
+  background: var(--bg);
+  font-size: 0.9rem;
+}
+
+.demo-panel h1 {
+  margin-top: 0.5rem;
+  font-size: 1.6rem;
+}
+
+.demo-panel h2 {
+  margin: 1.25rem 0 0.5rem;
+  font-size: 1rem;
+}
+
+.demo-panel p {
+  margin: 0.4rem 0;
+  color: var(--muted);
+}
+
+.demo-panel a {
+  color: var(--accent);
+}
+
+.demo-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.demo-top .lang-toggle {
+  position: static;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+}
+
+.legend .swatch {
+  display: inline-block;
+  width: 0.75rem;
+  height: 0.75rem;
+  margin-right: 0.4rem;
+  border-radius: 50%;
+  vertical-align: -0.05rem;
+}
+
+.controls {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.controls label {
+  display: grid;
+  grid-template-columns: minmax(9rem, 1fr) 1.3fr 2.6rem;
+  gap: 0.6rem;
+  align-items: center;
+  color: var(--muted);
+}
+
+.controls output,
+.figures dd,
+.law-detail {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+}
+
+.controls .note {
+  font-size: 0.8rem;
+}
+
+.controls .load {
+  color: var(--fg);
+}
+
+.controls .load.overload {
+  color: #c0392b;
+}
+
+.buttons {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.demo-panel button {
+  padding: 0.35rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.demo-panel button:hover,
+.demo-panel button:focus-visible {
+  border-color: var(--accent);
+}
+
+.figures {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.figures div {
+  justify-content: space-between;
+}
+
+.laws {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.laws li {
+  display: flex;
+  gap: 0.6rem;
+}
+
+.laws li div {
+  display: grid;
+}
+
+.law-detail {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.law-mark {
+  flex: none;
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: 50%;
+  background: var(--border);
+  text-align: center;
+  line-height: 1.4rem;
+  font-weight: 700;
+}
+
+.law-mark.holds {
+  background: #0ca30c;
+  color: #fff;
+}
+
+.law-mark.broken {
+  background: #d03b3b;
+  color: #fff;
+}
+
+.charts {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.chart {
+  margin: 0;
+}
+
+.chart figcaption {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.chart-canvas {
+  height: 9.5rem;
+}
+
+.demo-error {
+  color: #c0392b;
+}
+
+@media (max-width: 52rem) {
+  body.full-screen {
+    overflow: auto;
+  }
+
+  body.full-screen #app.demo {
+    grid-template-columns: 1fr;
+    grid-template-rows: 60vh auto;
+    height: auto;
+  }
+
+  .demo-panel {
+    border-left: 0;
+    border-top: 1px solid var(--border);
+  }
+}
+
+.pages {
+  margin-top: 2rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.pages h2 {
+  margin: 0;
+  font-size: 1.4rem;
+}
+
+.pages ul {
+  display: grid;
+  gap: 0.75rem;
+  margin: 1rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pages a {
+  color: var(--accent);
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+
+.pages p {
+  margin: 0.15rem 0 0;
+  color: var(--muted);
+}

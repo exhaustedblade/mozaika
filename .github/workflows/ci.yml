@@ -73,11 +73,38 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  # The pages of the viewer in a real browser (Playwright, Chromium): the demo and the
+  # scene benchmark draw, the frame is not empty, the shader agrees with its twin. CI has
+  # no graphics card (SwiftShader draws in software), so the benchmark's frame rates in the
+  # summary are only a guide; screenshots and results are an artifact of the job.
+  scene:
+    name: Scene
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup
+      - uses: actions/download-artifact@v4
+        with:
+          name: viewer
+          path: packages/viewer/dist
+      - name: Install Chromium for Playwright
+        run: pnpm --filter @mozaika/viewer exec playwright install --with-deps chromium
+      - run: pnpm --filter @mozaika/viewer e2e
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scene-screenshots
+          path: packages/viewer/e2e/results
+          if-no-files-found: warn
+          retention-days: 14
+
   # Publishes the viewer to GitHub Pages (gh-pages branch) once every check is green:
   # main goes to the site root, each pull request to its own folder pr-<number>/.
   preview:
     name: Preview
-    needs: [types, lint, test, bench, build]
+    needs: [types, lint, test, bench, build, scene]
     if: >-
       (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
       (github.event_name == 'pull_request' &&

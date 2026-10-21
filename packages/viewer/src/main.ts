@@ -22,6 +22,29 @@ function infoRow(label: string, value: string): HTMLElement {
   return row;
 }
 
+/** The pages of the preview with a scene: a link to each and what it shows, in the page's language. */
+function pageLinks(locale: Locale): HTMLElement {
+  const t = MESSAGES[locale];
+  const section = document.createElement('section');
+  section.className = 'pages';
+  section.append(element('h2', t.pagesTitle));
+  const list = document.createElement('ul');
+  const pages: [string, string, string][] = [
+    ['demo.html', t.demoLink, t.demoLinkAbout],
+    ['bench.html', t.benchLink, t.benchLinkAbout],
+  ];
+  for (const [href, title, about] of pages) {
+    const link = document.createElement('a');
+    link.href = `${href}?${LANG_PARAM}=${locale}`;
+    link.textContent = title;
+    const item = document.createElement('li');
+    item.append(link, element('p', about));
+    list.append(item);
+  }
+  section.append(list);
+  return section;
+}
+
 function render(root: HTMLElement, locale: Locale, motion: MotionCheck): void {
   const t = MESSAGES[locale];
   const other: Locale = locale === 'ru' ? 'en' : 'ru';
@@ -50,6 +73,7 @@ function render(root: HTMLElement, locale: Locale, motion: MotionCheck): void {
     element('p', t.subtitle, 'subtitle'),
     element('p', t.status),
     info,
+    pageLinks(locale),
     motion.element,
   );
 }

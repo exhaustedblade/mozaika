@@ -6,5 +6,11 @@ export default defineConfig({
   ...resolveFromSource,
   // Relative asset paths: the same build works at the site root and under /pr-<number>/.
   base: './',
+  build: {
+    rolldownOptions: {
+      // The pages of the preview: the home page, the demo and the scene benchmark.
+      input: { main: 'index.html', demo: 'demo.html', bench: 'bench.html' },
+    },
+  },
   test: { name: 'viewer' },
 });
