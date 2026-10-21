@@ -13,8 +13,12 @@
  *
  * It measures the built package (dist), as other packages run it. As in the
  * other benchmarks, the speed thresholds are about ten times below the speed
- * measured in CI, so that a slow machine passes but a real regression fails;
- * the memory ceiling is about ten times above the measured size.
+ * measured in CI, so that a slow machine passes but a real regression fails.
+ * The memory ceiling is the goal of the kernel on typed arrays (Ф0-4б, П-27):
+ * at most 250 bytes per agent. Memory hardly depends on the machine.
+ *
+ * The table also shows the kernel before Ф0-4б, as measured in CI, and how
+ * many times faster the kernel is now; the ratio is meaningful in CI only.
  *
  * Run: pnpm bench
  */
@@ -25,7 +29,7 @@ declare const process: { memoryUsage(): { heapUsed: number; arrayBuffers: number
 /** Node's garbage collector, present with `node --expose-gc`. */
 declare const gc: (() => void) | undefined;
 
-const MAX_BYTES_PER_AGENT = 5_000;
+const MAX_BYTES_PER_AGENT = 250;
 
 interface Scenario {
   readonly agents: number;
@@ -33,12 +37,26 @@ interface Scenario {
   readonly runLength: number;
   readonly runs: number;
   readonly minTimeUnitsPerSecond: number;
+  /** The kernel of objects before Ф0-4б, in CI (commit 47903fe, 21.10.2026). */
+  readonly before: { readonly timeUnitsPerSecond: number; readonly bytesPerAgent: number };
 }
 
 const SCENARIOS: readonly Scenario[] = [
-  { agents: 100_000, runLength: 4, runs: 5, minTimeUnitsPerSecond: 0.5 },
+  {
+    agents: 100_000,
+    runLength: 4,
+    runs: 5,
+    minTimeUnitsPerSecond: 0.5,
+    before: { timeUnitsPerSecond: 6.51, bytesPerAgent: 344 },
+  },
   // The goal of П-18. Shorter runs: each unit of model time is a million events.
-  { agents: 1_000_000, runLength: 0.5, runs: 3, minTimeUnitsPerSecond: 0.03 },
+  {
+    agents: 1_000_000,
+    runLength: 0.5,
+    runs: 3,
+    minTimeUnitsPerSecond: 0.03,
+    before: { timeUnitsPerSecond: 0.31, bytesPerAgent: 345 },
+  },
 ];
 
 const flip = defineStatechart(
@@ -135,6 +153,15 @@ const report = [
   tableRow('Память на агента, байт', ...columns((m) => number.format(m.bytesPerAgent))),
   tableRow('Память всего, МБ', ...columns((m) => decimal.format(m.megabytes))),
   tableRow('Порог, единиц времени в секунду', ...columns((m) => decimal.format(m.scenario.minTimeUnitsPerSecond))),
+  tableRow(
+    'До Ф0-4б в CI: единиц времени в секунду',
+    ...columns((m) => decimal.format(m.scenario.before.timeUnitsPerSecond)),
+  ),
+  tableRow(
+    'Быстрее, чем до Ф0-4б в CI, раз',
+    ...columns((m) => decimal.format(m.timeUnitsPerSecond / m.scenario.before.timeUnitsPerSecond)),
+  ),
+  tableRow('До Ф0-4б в CI: байт на агента', ...columns((m) => number.format(m.scenario.before.bytesPerAgent))),
   '',
   'Переходы A → B и B → A с интенсивностью 1: каждый агент меняет состояние в среднем раз за единицу времени. ' +
     'Скорость — медиана нескольких отрезков модельного времени после разогрева. ' +
