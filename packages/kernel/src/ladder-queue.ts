@@ -36,6 +36,12 @@ const MAX_RUNGS = 8;
 const EVENTS_PER_BUCKET = 4;
 /** Shorter runs are sorted by insertion, longer ones by merging. */
 const INSERTION_SORT_LIMIT = 24;
+/**
+ * Where an emptied Bottom starts again: the room before it takes events
+ * earlier than all others without moving any, such as a zero delay at the
+ * current moment in a queue of two or three events.
+ */
+const BOTTOM_HEADROOM = 8;
 const INITIAL_CAPACITY = 1024;
 
 /**
@@ -91,11 +97,11 @@ export class LadderQueue implements EventQueue {
   #bucketHeads = new Int32Array(INITIAL_CAPACITY);
   #bucketTails = new Int32Array(INITIAL_CAPACITY);
 
-  // Bottom: events [#bottomStart, #bottomEnd) sorted by key; a fired event leaves room before the first.
+  // Bottom: events [#bottomStart, #bottomEnd) sorted by key, with room before the first (BOTTOM_HEADROOM).
   #bottomTimes = new Float64Array(INITIAL_CAPACITY);
   #bottomSlots = new Int32Array(INITIAL_CAPACITY);
-  #bottomStart = 0;
-  #bottomEnd = 0;
+  #bottomStart = BOTTOM_HEADROOM;
+  #bottomEnd = BOTTOM_HEADROOM;
 
   // Room for the merge sort of a long Bottom, kept so that sorting does not allocate.
   #scratchTimes = new Float64Array(0);
@@ -147,20 +153,14 @@ export class LadderQueue implements EventQueue {
   }
 
   firstTime(): number {
-    if (this.#bottomStart === this.#bottomEnd) {
-      if (this.#size === 0) return Infinity;
-      this.#fillBottom();
-    }
+    if (this.#bottomStart === this.#bottomEnd && !this.#fillBottom()) return Infinity;
     return this.#bottomTimes[this.#bottomStart] ?? Infinity;
   }
 
   removeFirst(): number {
-    if (this.#bottomStart === this.#bottomEnd) {
-      if (this.#size === 0) return NONE;
-      this.#fillBottom();
-    }
+    if (this.#bottomStart === this.#bottomEnd && !this.#fillBottom()) return NONE;
     const slot = this.#bottomSlots[this.#bottomStart++] ?? NONE;
-    if (this.#bottomStart === this.#bottomEnd) this.#bottomStart = this.#bottomEnd = 0;
+    if (this.#bottomStart === this.#bottomEnd) this.#bottomStart = this.#bottomEnd = BOTTOM_HEADROOM;
     this.#rowLinks[INTS_PER_ROW * slot + PREVIOUS] = NOT_QUEUED;
     this.#size--;
     return slot;
@@ -212,7 +212,7 @@ export class LadderQueue implements EventQueue {
       return;
     }
     this.#topAfter = count <= SPLIT_THRESHOLD ? Infinity : max;
-    this.#ensureBottom(count);
+    this.#ensureBottom(BOTTOM_HEADROOM + count);
     const topSlots = this.#topSlots;
     const bottomTimes = this.#bottomTimes;
     const bottomSlots = this.#bottomSlots;
@@ -220,12 +220,12 @@ export class LadderQueue implements EventQueue {
     const links = this.#rowLinks;
     for (let i = 0; i < count; i++) {
       const slot = topSlots[i] ?? NONE;
-      bottomTimes[i] = times[FLOATS_PER_ROW * slot] ?? 0;
-      bottomSlots[i] = slot;
+      bottomTimes[BOTTOM_HEADROOM + i] = times[FLOATS_PER_ROW * slot] ?? 0;
+      bottomSlots[BOTTOM_HEADROOM + i] = slot;
       links[INTS_PER_ROW * slot + PREVIOUS] = IN_BOTTOM;
     }
-    this.#bottomStart = 0;
-    this.#bottomEnd = count;
+    this.#bottomStart = BOTTOM_HEADROOM;
+    this.#bottomEnd = BOTTOM_HEADROOM + count;
     this.#sortBottom();
   }
 
@@ -330,10 +330,12 @@ export class LadderQueue implements EventQueue {
 
   /**
    * Fills the empty Bottom from the last rung, removing the rungs it has
-   * taken, or from Top when no rungs are left. The caller knows the queue is
-   * not empty, so the loop ends.
+   * taken, or from Top when no rungs are left; false if the queue is empty.
+   * firstTime() and removeFirst() run on every event, so the work they rarely
+   * need is here, which keeps them small enough for V8 to inline.
    */
-  #fillBottom(): void {
+  #fillBottom(): boolean {
+    if (this.#size === 0) return false;
     while (this.#bottomStart === this.#bottomEnd) {
       if (this.#rungCount === 0) {
         this.#moveTopDown();
@@ -343,30 +345,31 @@ export class LadderQueue implements EventQueue {
       if (bucket === NONE) this.#rungCount--;
       else this.#moveBucketDown(bucket);
     }
+    return true;
   }
 
   /**
-   * Copies a bucket into the empty Bottom, then sorts it there, or, if it is
-   * too long, links its events into a new rung below.
+   * Copies a bucket into the empty Bottom, after the headroom, then sorts it
+   * there, or, if it is too long, links its events into a new rung below.
    */
   #moveBucketDown(bucket: number): void {
     const times = this.#rowTimes;
     const links = this.#rowLinks;
-    let count = 0;
+    let end = BOTTOM_HEADROOM;
     let min = Infinity;
     let max = -Infinity;
     let bottomTimes = this.#bottomTimes;
     let bottomSlots = this.#bottomSlots;
     let slot = this.#bucketHeads[bucket] ?? NONE;
     while (slot !== NONE) {
-      if (count === bottomTimes.length) {
-        this.#ensureBottom(count + 1);
+      if (end === bottomTimes.length) {
+        this.#ensureBottom(end + 1);
         bottomTimes = this.#bottomTimes;
         bottomSlots = this.#bottomSlots;
       }
       const time = times[FLOATS_PER_ROW * slot] ?? 0;
-      bottomTimes[count] = time;
-      bottomSlots[count++] = slot;
+      bottomTimes[end] = time;
+      bottomSlots[end++] = slot;
       links[INTS_PER_ROW * slot + PREVIOUS] = IN_BOTTOM;
       if (time < min) min = time;
       if (time > max) max = time;
@@ -374,9 +377,9 @@ export class LadderQueue implements EventQueue {
     }
     this.#bucketHeads[bucket] = NONE;
     this.#bucketTails[bucket] = NONE;
-    this.#bottomStart = 0;
-    this.#bottomEnd = count;
-    if (this.#canSplit(count, min, max)) this.#moveBottomToRung(min, max);
+    this.#bottomStart = BOTTOM_HEADROOM;
+    this.#bottomEnd = end;
+    if (this.#canSplit(end - BOTTOM_HEADROOM, min, max)) this.#moveBottomToRung(min, max);
     else this.#sortBottom();
   }
 
@@ -388,7 +391,7 @@ export class LadderQueue implements EventQueue {
     // A queue that lived in the Bottom alone has outgrown it: later events go to Top again.
     if (this.#topAfter === Infinity) this.#topAfter = max;
     this.#addRung(this.#bottomEnd - this.#bottomStart, min, max, this.#bottomSlots, this.#bottomStart);
-    this.#bottomStart = this.#bottomEnd = 0;
+    this.#bottomStart = this.#bottomEnd = BOTTOM_HEADROOM;
   }
 
   /**
@@ -491,7 +494,7 @@ export class LadderQueue implements EventQueue {
       }
       this.#bottomEnd = end - 1;
     }
-    if (this.#bottomStart === this.#bottomEnd) this.#bottomStart = this.#bottomEnd = 0;
+    if (this.#bottomStart === this.#bottomEnd) this.#bottomStart = this.#bottomEnd = BOTTOM_HEADROOM;
   }
 
   #sortBottom(): void {
