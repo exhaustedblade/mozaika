@@ -1,0 +1,7 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "customConditions": ["@mozaika/source"]
+  },
+  "include": ["src", "vitest.config.ts"]
+}

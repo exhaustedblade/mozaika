@@ -1,0 +1,22 @@
+{
+  "name": "@mozaika/blocks",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Process blocks (Source, Queue, Service, Delay, Sink and others) built on the Mozaika kernel.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "@mozaika/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@mozaika/kernel": "workspace:*"
+  }
+}
