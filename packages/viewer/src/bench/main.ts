@@ -4,65 +4,38 @@
  * drawn by instancing and led along their segments on the graphics card. It
  * warms up, measures for a while and shows the result — frames per second,
  * frame times, the time of a snapshot in the worker and of its upload — on
- * the page and as `window.mozaikaBench` for the Playwright test in CI.
+ * the page, with a button to copy it, and as `window.mozaikaBench` for the
+ * Playwright test in CI.
  */
 import '../style.css';
 
-import { KernelClient } from '../kernel-client.js';
+import { CreateGround } from '@babylonjs/core/Meshes/Builders/groundBuilder.js';
+
 import { detectLocale, type Locale, MESSAGES, type Messages } from '../i18n.js';
+import { KernelClient } from '../kernel-client.js';
+import { LiveView } from '../live-view.js';
 import { crowdSide } from '../models/crowd.js';
+import { AgentLayer } from '../scene/agent-layer.js';
+import { personMesh } from '../scene/person-geometry.js';
+import { Stage, toWorld } from '../scene/stage.js';
 import { canDrawScene, sceneUnavailable } from '../scene/webgl-support.js';
-import { SnapshotFeed } from '../snapshot-feed.js';
 import { ViewClock } from '../view-clock.js';
 import { Samples, type Summary, summarise } from './frame-stats.js';
-import { personMesh } from '../scene/person-geometry.js';
-import { type BenchStage, type CreateBenchStage, degenerateMesh } from './stage.js';
+import type { BenchResult } from './result.js';
 
-/** Seconds of real time before measuring and of measuring. */
+/** Seconds of real time before measuring, and of measuring by default. */
 const WARM_UP = 3;
 const DEFAULT_SECONDS = 10;
 const DEFAULT_AGENTS = 100_000;
-/** Model seconds per real second: the crowd walks five times as fast as people do, so motion is seen from afar. */
+/** Model seconds per real second: the crowd walks five times as fast as people do, so motion shows from afar. */
 const TIME_SCALE = 5;
 /** Fewest milliseconds between snapshots (docs/ARCHITECTURE.md, "Показ"). */
 const SNAPSHOT_INTERVAL = 50;
 const SEED = 1;
-/** Colours of the two states of a walker. */
+/** Colours of the two states of a walker: out and back. */
 const STATE_COLOURS = [0x2f6fb3, 0xd08a1e];
 
-/** What the page reports, on the page and to the Playwright test. */
-export interface BenchResult {
-  readonly engine: string;
-  readonly agents: number;
-  readonly renderer: string;
-  readonly userAgent: string;
-  readonly canvas: readonly [number, number];
-  readonly devicePixelRatio: number;
-  readonly seconds: number;
-  readonly framesPerSecond: number;
-  readonly frameInterval: Summary;
-  readonly frameWork: Summary;
-  readonly snapshotInWorker: Summary;
-  readonly runInWorker: Summary;
-  readonly upload: Summary;
-  readonly snapshotsPerSecond: number;
-}
-
-declare global {
-  interface Window {
-    mozaikaBench?: BenchResult;
-  }
-}
-
-const ENGINES: Readonly<Record<string, () => Promise<{ createStage: CreateBenchStage }>>> = {
-  three: () => import('./three-stage.js'),
-  babylon: () => import('./babylon-stage.js'),
-};
-
 interface Settings {
-  readonly engine: string;
-  /** `?mesh=degenerate`: no raster work, to compare the engines on a software GPU. */
-  readonly degenerate: boolean;
   readonly agents: number;
   readonly seconds: number;
   readonly locale: Locale;
@@ -70,16 +43,14 @@ interface Settings {
 
 function readSettings(): Settings {
   const query = new URLSearchParams(window.location.search);
-  const requested = query.get('engine') ?? 'three';
-  const engine = requested in ENGINES ? requested : 'three';
   const agents = Math.min(2_000_000, Math.max(1_000, Number(query.get('agents') ?? DEFAULT_AGENTS) || DEFAULT_AGENTS));
   const seconds = Math.min(120, Math.max(1, Number(query.get('seconds') ?? DEFAULT_SECONDS) || DEFAULT_SECONDS));
   const lang = query.get('lang');
   const locale = detectLocale(lang === null ? navigator.languages : [lang, ...navigator.languages]);
-  return { engine, degenerate: query.get('mesh') === 'degenerate', agents, seconds, locale };
+  return { agents, seconds, locale };
 }
 
-/** The panel over the scene: what is measured, live figures and the result. */
+/** The panel over the scene: what is measured, the figures and the result. */
 class Panel {
   readonly element = document.createElement('aside');
   readonly #figures = new Map<keyof Messages, HTMLElement>();
@@ -94,7 +65,7 @@ class Panel {
     title.textContent = t.benchTitle;
     const about = document.createElement('p');
     about.textContent = t.benchAbout;
-    const sizes = document.createElement('nav');
+    const links = document.createElement('nav');
     for (const agents of [100_000, 1_000_000]) {
       const link = document.createElement('a');
       const url = new URL(window.location.href);
@@ -102,15 +73,14 @@ class Panel {
       link.href = url.toString();
       link.textContent = new Intl.NumberFormat(t.numberLocale).format(agents);
       if (agents === settings.agents) link.setAttribute('aria-current', 'page');
-      sizes.append(link);
+      links.append(link);
     }
     const home = document.createElement('a');
     home.href = './';
     home.textContent = t.benchBack;
-    sizes.append(home);
+    links.append(home);
     const list = document.createElement('dl');
     const rows: (keyof Messages)[] = [
-      'benchEngine',
       'benchAgents',
       'benchRenderer',
       'benchFps',
@@ -131,8 +101,8 @@ class Panel {
       list.append(row);
     }
     this.#progress.className = 'bench-progress';
-    this.element.append(title, about, sizes, this.#progress, list, this.#result);
-    this.show('benchEngine', settings.engine);
+    this.#progress.setAttribute('aria-live', 'polite');
+    this.element.append(title, about, links, this.#progress, list, this.#result);
     this.show('benchAgents', new Intl.NumberFormat(t.numberLocale).format(settings.agents));
   }
 
@@ -145,8 +115,15 @@ class Panel {
     this.#progress.textContent = text;
   }
 
-  /** Shows the result and a button that copies it as JSON, to send. */
+  /** Shows the figures of the result and a button that copies it all as JSON, to send. */
   finish(result: BenchResult): void {
+    this.show('benchFps', format(result.framesPerSecond));
+    this.show('benchFrameInterval', pair(result.frameInterval));
+    this.show('benchFrameWork', pair(result.frameWork));
+    this.show('benchSnapshot', pair(result.snapshotInWorker));
+    this.show('benchRun', pair(result.runInWorker));
+    this.show('benchUpload', pair(result.upload));
+    this.show('benchSnapshotsPerSecond', format(result.snapshotsPerSecond));
     const json = JSON.stringify(result, null, 2);
     const copy = document.createElement('button');
     copy.type = 'button';
@@ -170,6 +147,43 @@ function pair(summary: Summary): string {
   return `${format(summary.median, 2)} / ${format(summary.p95, 2)}`;
 }
 
+/** Warm-up, then measuring, then the result; the frames go on after it. */
+class Measurement {
+  readonly samples = new Samples();
+  #phase: 'warm-up' | 'measuring' | 'done' = 'warm-up';
+  #begun: number | undefined;
+  #measuredFrom = 0;
+  #snapshots = 0;
+  readonly #seconds: number;
+  readonly #onPhase: (phase: 'measuring' | 'done', seconds: number, snapshots: number) => void;
+
+  constructor(seconds: number, onPhase: (phase: 'measuring' | 'done', seconds: number, snapshots: number) => void) {
+    this.#seconds = seconds;
+    this.#onPhase = onPhase;
+  }
+
+  get measuring(): boolean {
+    return this.#phase === 'measuring';
+  }
+
+  snapshot(): void {
+    if (this.measuring) this.#snapshots++;
+  }
+
+  frame(now: number): void {
+    this.#begun ??= now;
+    const seconds = (now - this.#begun) / 1000;
+    if (this.#phase === 'warm-up' && seconds >= WARM_UP) {
+      this.#phase = 'measuring';
+      this.#measuredFrom = now;
+      this.#onPhase('measuring', 0, 0);
+    } else if (this.#phase === 'measuring' && seconds >= WARM_UP + this.#seconds) {
+      this.#phase = 'done';
+      this.#onPhase('done', (now - this.#measuredFrom) / 1000, this.#snapshots);
+    }
+  }
+}
+
 async function start(root: HTMLElement): Promise<void> {
   const settings = readSettings();
   const t = MESSAGES[settings.locale];
@@ -181,91 +195,70 @@ async function start(root: HTMLElement): Promise<void> {
     return;
   }
   const canvas = document.createElement('canvas');
-  canvas.className = 'bench-canvas';
+  canvas.className = 'scene-canvas';
   root.replaceChildren(canvas, panel.element);
 
-  const load = ENGINES[settings.engine] ?? ENGINES.three;
-  if (load === undefined) throw new Error('no engine');
-  const { createStage } = await load();
-  const mesh = settings.degenerate ? degenerateMesh() : personMesh();
-  const stage = createStage(canvas, { side: crowdSide(settings.agents), stateColours: STATE_COLOURS, mesh });
+  const side = crowdSide(settings.agents);
+  const centre = { x: side / 2, y: side / 2 };
+  const stage = new Stage(canvas, {
+    background: '#dfe3e8',
+    view: { target: centre, distance: side * 0.95, tilt: 0.95, closest: 5, farthest: side * 3 },
+  });
+  const floor = CreateGround('floor', { width: side, height: side }, stage.scene);
+  floor.position = toWorld(centre);
+  floor.material = stage.matte('floor', '#c9c4b8');
+  const agents = new AgentLayer(stage.scene, { mesh: personMesh(), stateColours: STATE_COLOURS });
   panel.show('benchRenderer', stage.renderer);
 
   const worker = new Worker(new URL('../kernel-worker.ts', import.meta.url), { type: 'module' });
   const client = new KernelClient(worker);
+  panel.progress(t.benchProgressWarmUp);
   await client.build('crowd', SEED, { agents: settings.agents });
-  run(stage, client, panel, settings, t);
-}
 
-/** The frames: warm-up, measuring, and on after the result is in. */
-function run(stage: BenchStage, client: KernelClient, panel: Panel, settings: Settings, t: Messages): void {
-  const clock = new ViewClock({ timeScale: TIME_SCALE, maxLead: 0.25, maxStep: 0.1 });
-  const samples = new Samples();
-  let snapshotTime: number | undefined;
-  let measuring = false;
-  let snapshots = 0;
-  const feed = new SnapshotFeed(client, {
-    minInterval: SNAPSHOT_INTERVAL,
-    onSnapshot: (snapshot, ran) => {
-      const population = snapshot.populations[0];
-      if (population === undefined) return;
-      const started = performance.now();
-      stage.upload(population);
-      if (measuring) {
-        samples.upload.push(performance.now() - started);
-        samples.snapshotInWorker.push(snapshot.workerMilliseconds);
-        samples.runInWorker.push(ran.workerMilliseconds);
-        snapshots++;
+  const measurement = new Measurement(settings.seconds, (phase, seconds, snapshots) => {
+    if (phase === 'measuring') {
+      panel.progress(t.benchProgressMeasuring);
+      return;
+    }
+    const result = summary(stage, settings, measurement.samples, seconds, snapshots);
+    window.mozaikaBench = result;
+    panel.progress(t.benchProgressDone);
+    panel.finish(result);
+  });
+  const { samples } = measurement;
+  const view = new LiveView({
+    stage,
+    agents,
+    client,
+    clock: new ViewClock({ timeScale: TIME_SCALE, maxLead: 0.25, maxStep: 0.1 }),
+    snapshotInterval: SNAPSHOT_INTERVAL,
+    onSnapshot: (snapshot, ran, upload) => {
+      if (!measurement.measuring) return;
+      measurement.snapshot();
+      samples.upload.push(upload);
+      samples.snapshotInWorker.push(snapshot.workerMilliseconds);
+      samples.runInWorker.push(ran.workerMilliseconds);
+    },
+    onFrame: ({ now, interval, work }) => {
+      if (measurement.measuring) {
+        samples.frameIntervals.push(interval);
+        samples.frameWork.push(work);
       }
-      snapshotTime = snapshot.time;
+      measurement.frame(now);
     },
     onError: (error) => {
       panel.progress(error instanceof Error ? error.message : String(error));
     },
   });
-
-  const begun = performance.now();
-  let last: number | undefined;
-  let measuredFrom = 0;
-  let done = false;
-  panel.progress(t.benchProgressWarmUp);
-  const frame = (now: number): void => {
-    const started = performance.now();
-    const elapsed = last === undefined ? 0 : now - last;
-    if (measuring && last !== undefined) samples.frameIntervals.push(elapsed);
-    last = now;
-    const time = clock.tick(elapsed / 1000, feed.latest);
-    feed.frame(time, now);
-    stage.render(snapshotTime === undefined ? 0 : time - snapshotTime);
-    if (measuring) samples.frameWork.push(performance.now() - started);
-
-    const seconds = (now - begun) / 1000;
-    if (!measuring && !done && seconds >= WARM_UP) {
-      measuring = true;
-      measuredFrom = now;
-      panel.progress(t.benchProgressMeasuring);
-    } else if (measuring && seconds >= WARM_UP + settings.seconds) {
-      measuring = false;
-      done = true;
-      const result = summary(stage, settings, samples, (now - measuredFrom) / 1000, snapshots);
-      window.mozaikaBench = result;
-      panel.progress(t.benchProgressDone);
-      showResult(panel, result);
-      panel.finish(result);
-    }
-    requestAnimationFrame(frame);
-  };
-  requestAnimationFrame(frame);
+  view.start();
 }
 
-function summary(stage: BenchStage, settings: Settings, samples: Samples, seconds: number, snapshots: number): BenchResult {
-  const canvas = document.querySelector('canvas');
+function summary(stage: Stage, settings: Settings, samples: Samples, seconds: number, snapshots: number): BenchResult {
   return {
-    engine: settings.engine,
     agents: settings.agents,
     renderer: stage.renderer,
     userAgent: navigator.userAgent,
-    canvas: [canvas?.width ?? 0, canvas?.height ?? 0],
+    canvas: stage.size,
     devicePixelRatio: window.devicePixelRatio,
     seconds,
     framesPerSecond: samples.frameIntervals.length / seconds,
@@ -278,22 +271,9 @@ function summary(stage: BenchStage, settings: Settings, samples: Samples, second
   };
 }
 
-function showResult(panel: Panel, result: BenchResult): void {
-  panel.show('benchFps', format(result.framesPerSecond));
-  panel.show('benchFrameInterval', pair(result.frameInterval));
-  panel.show('benchFrameWork', pair(result.frameWork));
-  panel.show('benchSnapshot', pair(result.snapshotInWorker));
-  panel.show('benchRun', pair(result.runInWorker));
-  panel.show('benchUpload', pair(result.upload));
-  panel.show('benchSnapshotsPerSecond', format(result.snapshotsPerSecond));
-}
-
 const root = document.getElementById('app');
 if (root !== null) {
   start(root).catch((error: unknown) => {
-    const message = document.createElement('p');
-    message.className = 'scene-unavailable';
-    message.textContent = error instanceof Error ? error.message : String(error);
-    root.append(message);
+    root.append(sceneUnavailable(error instanceof Error ? error.message : String(error)));
   });
 }

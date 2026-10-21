@@ -76,3 +76,23 @@ function profileNormal(ring: number): [number, number] {
   const length = Math.hypot(radial, up);
   return [radial / length, up / length];
 }
+
+/** A flat disc on the floor under a person, for its soft shadow: a fan of triangles, facing up. */
+export function floorDisc(): { mesh: MeshData; radius: number } {
+  const radius = 0.4;
+  const sides = 12;
+  const height = 0.01;
+  const positions = new Float32Array(3 * (sides + 1));
+  const normals = new Float32Array(3 * (sides + 1));
+  positions.set([0, height, 0], 0);
+  normals.set([0, 1, 0], 0);
+  for (let side = 0; side < sides; side++) {
+    const angle = (2 * Math.PI * side) / sides;
+    positions.set([radius * Math.cos(angle), height, radius * Math.sin(angle)], 3 * (side + 1));
+    normals.set([0, 1, 0], 3 * (side + 1));
+  }
+  const indices: number[] = [];
+  // Counter-clockwise seen from above.
+  for (let side = 0; side < sides; side++) indices.push(0, ((side + 1) % sides) + 1, side + 1);
+  return { mesh: { positions, normals, indices: Uint16Array.from(indices) }, radius };
+}

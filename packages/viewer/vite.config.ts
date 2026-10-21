@@ -8,8 +8,8 @@ export default defineConfig({
   base: './',
   build: {
     rolldownOptions: {
-      // The pages of the preview: the home page and the scene benchmark.
-      input: { main: 'index.html', bench: 'bench.html' },
+      // The pages of the preview: the home page, the demo and the scene benchmark.
+      input: { main: 'index.html', demo: 'demo.html', bench: 'bench.html' },
     },
   },
   test: { name: 'viewer' },

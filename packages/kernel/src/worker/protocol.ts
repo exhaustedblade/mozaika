@@ -13,7 +13,7 @@ import type { SimulationErrorCode } from '../errors.js';
 import type { AnyPopulation } from '../agents/population.js';
 import type { PopulationSnapshot, ReturnedSnapshot } from '../agents/population-snapshots.js';
 import type { RunEndReason, Simulation } from '../simulation.js';
-import type { JsonValue, Snapshot, SnapshotRecorder } from '../snapshots.js';
+import type { Snapshot, SnapshotRecorder } from '../snapshots.js';
 
 /** Parameters of a model by name: numbers that the model reads while it runs. */
 export type ModelParameters = Readonly<Record<string, number>>;
@@ -118,7 +118,7 @@ export interface RanReply {
   readonly events: number;
   readonly reason: RunEndReason;
   /** The records the model took since the previous run reply, oldest first; only if the model keeps records. */
-  readonly records?: readonly Snapshot<JsonValue>[];
+  readonly records?: readonly Snapshot[];
 }
 
 export interface SnapshotReply {
