@@ -1,8 +1,8 @@
+import { expectFormulaInInterval } from '@mozaika/kernel/test-support';
 import { beforeAll, describe, it } from 'vitest';
 
 import { mm1k } from './test-support/queueing-formulas.js';
 import { type ReplicationEstimates, runReplications, type RunLength } from './test-support/queueing-model.js';
-import { expectFormulaInInterval } from './test-support/theory-checks.js';
 
 /**
  * M/M/1/K on blocks: a Service with one server and capacity K right after the
