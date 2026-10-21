@@ -68,6 +68,26 @@ jobs:
               (cd "$dir/packages/blocks" && node bench/mm1.ts && node --expose-gc bench/crowded-delay.ts) | grep -E '^\| (M/M/1|Единиц|Память на)' | sed "s/^/$side $round B /"
             done
           done
+          for side in main branch; do
+            if [ "$side" = main ]; then dir=../main-ab; else dir=.; fi
+            for flags in "" "--no-turbo-inlining"; do
+              rm -rf "/tmp/prof-$side"
+              (cd "$dir/packages/blocks" && node $flags --cpu-prof --cpu-prof-dir="/tmp/prof-$side" bench/mm1.ts > /dev/null)
+              echo "PROFILE $side $flags"
+              python3 - "/tmp/prof-$side" <<'PY'
+          import collections, glob, json, sys
+          profile = json.load(open(glob.glob(sys.argv[1] + '/*.cpuprofile')[0]))
+          nodes = {node['id']: node for node in profile['nodes']}
+          times = collections.Counter()
+          for sample, delta in zip(profile['samples'], profile['timeDeltas']):
+              frame = nodes[sample]['callFrame']
+              times[f"{frame['functionName'] or '(anon)'} {frame['url'].split('/')[-1]}:{frame['lineNumber']}"] += delta
+          total = sum(times.values())
+          for name, time in times.most_common(25):
+              print(f'PROF {100 * time / total:5.1f}% {name}')
+          PY
+            done
+          done
 
   build:
     name: Build
