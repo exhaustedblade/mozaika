@@ -25,6 +25,15 @@ export interface AddAgentOptions {
 }
 
 /**
+ * A population with any fields, for code that does not touch them, such as
+ * snapshots. AgentPopulation<TContext> is invariant in its fields — its
+ * statechart's actions take them — so an AgentPopulation<{ speed: number }>
+ * is not an AgentPopulation<object>.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- any fields, as explained above
+export type AnyPopulation = AgentPopulation<any>;
+
+/**
  * Names of the populations of each simulation, kept here because the kernel's
  * Simulation knows nothing about agents. Keyed weakly: a finished simulation
  * takes its names with it when it is garbage-collected.
@@ -32,16 +41,28 @@ export interface AddAgentOptions {
 const populationNames = new WeakMap<Simulation, Set<string>>();
 
 /**
+ * Reads the store of a population, for the modules of the agents that work on
+ * its columns (population-snapshots.ts). Set once, by the static block of
+ * AgentPopulation, which sees its private fields: model code cannot reach the store.
+ */
+export let storeOf: <TContext extends object>(population: AgentPopulation<TContext>) => AgentStore<TContext>;
+
+/**
  * The agents of one type. They are numbered 1, 2, 3… in the order of
- * creation. Their ids and state codes are kept in dense columns, in the order
- * of creation until an agent is removed: the last agent then takes its place.
- * So a snapshot of a large population is a few typed arrays (ids(), stateCodes()).
+ * creation. Their ids, state codes, creation times and movement are kept in
+ * dense columns, in the order of creation until an agent is removed: the last
+ * agent then takes its place. So a snapshot of a large population is a few
+ * typed arrays (ids(), stateCodes(), positions(), PopulationSnapshots).
  */
 export class AgentPopulation<TContext extends object = object> {
   readonly simulation: Simulation;
   readonly name: string;
   readonly statechart: Statechart<TContext>;
   readonly #store: AgentStore<TContext>;
+
+  static {
+    storeOf = (population) => population.#store;
+  }
 
   constructor(simulation: Simulation, options: AgentPopulationOptions<TContext>) {
     this.simulation = simulation;
@@ -147,6 +168,28 @@ export class AgentPopulation<TContext extends object = object> {
       );
     }
     return this.#store.copyCodes();
+  }
+
+  /**
+   * Where every agent is now (docs/AGENTS.md, section 9): x and y of each in
+   * turn, in the order of the columns, computed in one pass over their
+   * segments; agents that have never moved stand at the origin. Written into
+   * `into` if it is given — it must hold 2 × size numbers — or else into a
+   * new array. Reuse an array to read the positions of a large population
+   * often: a new one of a million agents is 16 MB for the garbage collector.
+   */
+  positions(into?: Float64Array): Float64Array {
+    const length = 2 * this.size;
+    if (into !== undefined && (!(into instanceof Float64Array) || into.length < length)) {
+      throw new SimulationError(
+        'INVALID_ARGUMENT',
+        `AgentPopulation "${this.name}": positions() needs a Float64Array of at least ${String(length)} numbers, ` +
+          `got ${into instanceof Float64Array ? `${String(into.length)} numbers` : describeValue(into)}`,
+      );
+    }
+    const positions = into ?? new Float64Array(length);
+    this.#store.writePositions(positions);
+    return positions;
   }
 
   /**

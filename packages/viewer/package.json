@@ -12,6 +12,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@mozaika/blocks": "workspace:*",
     "@mozaika/kernel": "workspace:*"
   },
   "devDependencies": {

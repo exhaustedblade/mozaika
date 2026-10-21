@@ -93,6 +93,30 @@ function outcomesOfSharedPool(seed: number): string[] {
   ];
 }
 
+/**
+ * The times of the flow that read the creation time of agents: the id and
+ * creation time of each entity as it enters the Sink, before the Sink removes
+ * it, and the Sink's time in system. Numbers in full, so equal lines mean
+ * equal bits.
+ */
+function creationTimesOfFlow(seed: number): string[] {
+  const sim = new Simulation({ seed });
+  const leaving: string[] = [];
+  const { exit } = buildFlow(
+    sim,
+    () =>
+      new Sink(sim, {
+        name: 'exit',
+        onEnter: ({ agent }) => {
+          leaving.push(`${String(agent.id)} ${String(agent.createdAt)}`);
+        },
+      }),
+  );
+  sim.run(300);
+  const { timeInSystem } = exit.stats;
+  return [...leaving, `exit ${String(exit.count)} ${String(timeInSystem.mean)} ${String(timeInSystem.count)}`];
+}
+
 describe('blocks on the kernel', () => {
   it('give an identical trace for the same seed and a different one for another seed', () => {
     const first = traceOfFlow(2026);
@@ -123,6 +147,16 @@ describe('blocks on the kernel', () => {
       '0.46523077629104115 0 #4 desk: door#2 service ends',
       '0.46523077629104115 0 #7 desk places → door#3 at hall',
     ]);
+  });
+
+  it('give the same creation times and times in system as before the creation time moved into a column', () => {
+    // Recorded with the kernel of commit fb68d1f, which kept the creation time in a field of the
+    // agent (before Ф0-6а): the same times, bit for bit.
+    const times = creationTimesOfFlow(2026);
+    expect({ lines: times.length, fingerprint: fingerprint(times) }).toEqual({
+      lines: 402,
+      fingerprint: '365eb4c3',
+    });
   });
 
   it('give the same outcomes as the blocks on processes before Ф0-4в', () => {

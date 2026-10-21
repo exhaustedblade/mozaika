@@ -192,6 +192,34 @@ describe('agent populations: removing agents', () => {
     expect(agents.add().id).toBe(6);
   });
 
+  it('keeps the creation time of every agent through removals; a removed agent no longer tells its own', () => {
+    const sim = new Simulation();
+    const agents = new AgentPopulation(sim, { name: 'agents', statechart: twoStates });
+    const created: Agent[] = [];
+    for (const time of [0, 0.25, 1.5, 2.75]) {
+      sim.run(time);
+      created.push(agents.add());
+    }
+    const [first, removed, third, last] = created;
+    if (first === undefined || removed === undefined || third === undefined || last === undefined) {
+      throw new Error('an agent is missing');
+    }
+    sim.run(10);
+    agents.remove(removed);
+    // The last agent took the row of the removed one; every agent still tells its own time.
+    expect(agents.agents.map((agent) => [agent.id, agent.createdAt])).toEqual([
+      [1, 0],
+      [4, 2.75],
+      [3, 1.5],
+    ]);
+    // It has left the columns (П-46): asking is an error, as for its position.
+    expect(() => removed.createdAt).toThrow(simulationError('INVALID_STATE', { message: containing('agents#2') }));
+    agents.remove(first);
+    expect([third.createdAt, last.createdAt]).toEqual([1.5, 2.75]);
+    // A new agent in a row left by a removed one gets the time of its own creation.
+    expect(agents.add().createdAt).toBe(10);
+  });
+
   it('cancels the timeouts of a removed agent and keeps those of the agent moved into its place', () => {
     const sim = new Simulation();
     const log: string[] = [];

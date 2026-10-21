@@ -86,3 +86,99 @@ dd {
 .lang-toggle:focus-visible {
   border-color: var(--accent);
 }
+
+.motion {
+  margin-top: 2.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.motion h2 {
+  margin: 0;
+  font-size: 1.4rem;
+}
+
+.motion-canvas {
+  display: block;
+  width: 100%;
+  aspect-ratio: 100 / 60;
+  margin-top: 1rem;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+}
+
+.motion-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+}
+
+.motion-legend .swatch {
+  display: inline-block;
+  width: 0.7rem;
+  height: 0.7rem;
+  margin-right: 0.4rem;
+  border-radius: 50%;
+}
+
+.motion-figures {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  margin-top: 1rem;
+}
+
+.motion-figures dt {
+  min-width: 12rem;
+}
+
+.motion-controls {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.motion-controls label {
+  display: grid;
+  grid-template-columns: minmax(12rem, 1fr) 2fr 3rem;
+  gap: 0.75rem;
+  align-items: center;
+  color: var(--muted);
+}
+
+.motion-controls output {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  color: var(--fg);
+}
+
+.motion-buttons {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.motion-controls button {
+  padding: 0.35rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.motion-error {
+  color: #c0392b;
+}
+
+@media (max-width: 36rem) {
+  .motion-controls label {
+    grid-template-columns: 1fr 3rem;
+  }
+
+  .motion-controls label span {
+    grid-column: 1 / -1;
+  }
+}

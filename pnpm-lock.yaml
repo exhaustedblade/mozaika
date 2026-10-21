@@ -201,6 +201,9 @@ importers:
 
   packages/viewer:
     dependencies:
+      '@mozaika/blocks':
+        specifier: workspace:*
+        version: link:../blocks
       '@mozaika/kernel':
         specifier: workspace:*
         version: link:../kernel

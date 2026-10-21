@@ -1,5 +1,5 @@
 /** The typed arrays the kernel keeps its columns in. */
-export type Column = Float64Array | Uint32Array | Int32Array | Uint16Array;
+export type Column = Float64Array | Uint32Array | Int32Array | Uint16Array | Uint8Array;
 
 /**
  * Copies a full column into the start of a larger one and returns the larger

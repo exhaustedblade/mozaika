@@ -4,6 +4,7 @@ import { type ProcessBody, timeout } from '../process.js';
 import { Simulation } from '../simulation.js';
 import { describeEvent } from '../test-helpers.js';
 import { fingerprint } from '../test-support/index.js';
+import type { Point } from './motion.js';
 import { AgentPopulation } from './population.js';
 import { defineStatechart, rate } from './statechart.js';
 
@@ -91,6 +92,66 @@ function runTown(seed: number, { withVisitors = false, withDeaths = false } = {}
   return { trace, infections, deaths };
 }
 
+interface WalkRun {
+  readonly trace: readonly string[];
+  /** Positions of the walkers at the end, x and y in turn. */
+  readonly positions: readonly number[];
+}
+
+/**
+ * Walkers in a square: each walks to a random point and rests there for a
+ * random time. A whistle every 2 units of time stops the walkers whose move is
+ * bound to their state; a walker that reaches the gate at the corner leaves
+ * and a new one comes in. Uses everything of movement that affects the order
+ * of events: arrivals, moves started on arrival, stopOnExit, removal.
+ */
+function atGate(point: Point): boolean {
+  return point.x === 0 && point.y === 0;
+}
+
+function runWalk(seed: number): WalkRun {
+  const trace: string[] = [];
+  const sim = new Simulation({ seed, trace: (event) => trace.push(describeEvent(event)) });
+  const walker = defineStatechart(
+    {
+      initial: 'walking',
+      states: {
+        walking: {
+          entry: ({ agent, random }) => {
+            const toGate = random.uniform() < 0.1;
+            const target = toGate ? { x: 0, y: 0 } : { x: random.uniform(0, 10), y: random.uniform(0, 10) };
+            agent.moveTo(target, { speed: random.uniform(0.5, 2), stopOnExit: random.uniform() < 0.5 });
+          },
+          on: {
+            'agent.arrived': [{ guard: ({ agent }) => atGate(agent.position), target: 'gone' }, 'resting'],
+            whistle: 'resting',
+          },
+        },
+        resting: { after: { rest: 'walking' } },
+        gone: {
+          type: 'final',
+          entry: ({ agent }) => {
+            agent.population.remove(agent);
+            agent.population.add();
+          },
+        },
+      },
+    },
+    { delays: { rest: rate(1) } },
+  );
+  const walkers = new AgentPopulation(sim, { name: 'walkers', statechart: walker });
+  for (let i = 0; i < 50; i++) walkers.add();
+  function* whistle(): ProcessBody {
+    for (;;) {
+      yield timeout(2);
+      for (const agent of walkers.agents) agent.send({ type: 'whistle' });
+    }
+  }
+  sim.process(whistle(), { name: 'whistle' });
+  sim.run(40);
+  return { trace, positions: [...walkers.positions()] };
+}
+
 describe('agents: repeatability by seed', () => {
   it('gives an identical event trace for the same seed', () => {
     const first = runTown(2026);
@@ -121,6 +182,16 @@ describe('agents: repeatability by seed', () => {
     const second = runTown(2026, { withDeaths: true });
     expect(first.deaths).toBeGreaterThan(10);
     expect(second.trace).toEqual(first.trace);
+  });
+
+  it('gives an identical trace for the same seed when agents move, stop and leave', () => {
+    const first = runWalk(2026);
+    expect(first.trace.length).toBeGreaterThan(500);
+    expect(first.trace.filter((line) => line.endsWith(': arrival')).length).toBeGreaterThan(100);
+    const second = runWalk(2026);
+    expect(second.trace).toEqual(first.trace);
+    expect(second.positions).toEqual(first.positions);
+    expect(runWalk(2027).trace).not.toEqual(first.trace);
   });
 
   it('keeps what happens to one population when another population is added', () => {
