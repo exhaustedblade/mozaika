@@ -1,0 +1,10 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    // The benchmark uses only console and performance, which Node and browsers
+    // share. The DOM library describes them, so no @types/node is needed.
+    "lib": ["ES2023", "DOM"],
+    "customConditions": ["@mozaika/source"]
+  },
+  "include": ["*.ts"]
+}
