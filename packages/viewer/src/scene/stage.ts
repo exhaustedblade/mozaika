@@ -29,6 +29,7 @@ export interface CameraView {
   readonly farthest: number;
 }
 
+/** The background of a scene and where its camera starts. */
 export interface StageOptions {
   /** Colour behind the scene, '#rrggbb'. */
   readonly background: string;
@@ -40,11 +41,13 @@ export function toWorld(point: Point, height = 0): Vector3 {
   return new Vector3(point.x, height, -point.y);
 }
 
+/** The engine, the scene, its light and its camera, on one canvas. */
 export class Stage {
   readonly engine: Engine;
   readonly scene: Scene;
   readonly camera: ArcRotateCamera;
   readonly #canvas: HTMLCanvasElement;
+  readonly #resizes: ResizeObserver;
 
   constructor(canvas: HTMLCanvasElement, options: StageOptions) {
     this.#canvas = canvas;
@@ -68,12 +71,23 @@ export class Stage {
     this.camera.lowerRadiusLimit = view.closest;
     this.camera.upperRadiusLimit = view.farthest;
     this.camera.upperBetaLimit = Math.PI / 2 - 0.08;
-    this.camera.minZ = Math.max(0.05, view.closest / 50);
+    // The near plane as far as the closest zoom allows: depth keeps its precision far out, where
+    // shadows and floor mats lie a couple of centimetres above the floor.
+    this.camera.minZ = view.closest / 8;
     this.camera.maxZ = view.farthest * 4;
     this.camera.useNaturalPinchZoom = true;
     this.camera.wheelDeltaPercentage = 0.02;
     this.camera.attachControl(canvas, true);
+    this.camera.onViewMatrixChangedObservable.add(() => {
+      this.#followPanning();
+    });
     this.#followPanning();
+    // The canvas follows the page's layout; reading the layout on every frame would cost each frame.
+    this.#resizes = new ResizeObserver(() => {
+      this.engine.resize();
+      this.#followPanning();
+    });
+    this.#resizes.observe(canvas);
   }
 
   /** The renderer, as the browser names the graphics card, if it tells. */
@@ -90,9 +104,8 @@ export class Stage {
     return material;
   }
 
-  /** Draws a frame, at the canvas's current size. */
+  /** Draws a frame. */
   render(): void {
-    this.engine.resize();
     this.scene.render();
   }
 
@@ -102,22 +115,19 @@ export class Stage {
   }
 
   dispose(): void {
+    this.#resizes.disconnect();
     this.scene.dispose();
     this.engine.dispose();
   }
 
   /**
    * Panning in proportion to the distance, so that the floor follows the
-   * cursor whether the camera is close or far: Babylon's sensibility is a
-   * divisor of the pointer's movement.
+   * cursor whether the camera is close or far: Babylon's sensibility is
+   * pointer pixels per unit of length.
    */
   #followPanning(): void {
-    this.camera.onViewMatrixChangedObservable.add(() => {
-      const pixels = Math.max(1, this.#canvas.clientHeight);
-      const metresPerPixel = (2 * this.camera.radius * Math.tan(this.camera.fov / 2)) / pixels;
-      this.camera.panningSensibility = 1 / metresPerPixel;
-    });
     const pixels = Math.max(1, this.#canvas.clientHeight);
-    this.camera.panningSensibility = pixels / (2 * this.camera.radius * Math.tan(this.camera.fov / 2));
+    const metresPerPixel = (2 * this.camera.radius * Math.tan(this.camera.fov / 2)) / pixels;
+    this.camera.panningSensibility = 1 / metresPerPixel;
   }
 }

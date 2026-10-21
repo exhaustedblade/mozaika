@@ -6,6 +6,7 @@
  * leave arrived agents standing until the kernel gives them their next walks.
  */
 
+/** How the clock runs: its scale, and how far and how fast frames may move ahead. */
 export interface ViewClockOptions {
   /** Units of model time per second of real time. */
   readonly timeScale: number;
@@ -15,6 +16,7 @@ export interface ViewClockOptions {
   readonly maxStep: number;
 }
 
+/** The model time of the frames; see the module comment. */
 export class ViewClock {
   /** Units of model time per second of real time; the panel changes it. */
   timeScale: number;

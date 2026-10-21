@@ -56,7 +56,7 @@ export function personMesh(): MeshData {
       const b = ring * SIDES + ((side + 1) % SIDES);
       const c = a + SIDES;
       const d = b + SIDES;
-      // Counter-clockwise seen from outside, the front face for both engines.
+      // Counter-clockwise seen from outside: the front face in a right-handed scene.
       indices.push(a, c, b, b, c, d);
     }
   }
@@ -81,7 +81,8 @@ function profileNormal(ring: number): [number, number] {
 export function floorDisc(): { mesh: MeshData; radius: number } {
   const radius = 0.4;
   const sides = 12;
-  const height = 0.01;
+  // Above the floor by as much as the depth buffer tells apart from the farthest zoom of a scene.
+  const height = 0.02;
   const positions = new Float32Array(3 * (sides + 1));
   const normals = new Float32Array(3 * (sides + 1));
   positions.set([0, height, 0], 0);

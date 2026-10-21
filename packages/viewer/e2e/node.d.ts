@@ -18,6 +18,10 @@ declare module 'node:fs' {
   export function writeFileSync(path: string, data: string): void;
 }
 
+declare module 'node:url' {
+  export function fileURLToPath(url: string | URL): string;
+}
+
 declare module 'node:zlib' {
   export function gzipSync(data: Uint8Array, options?: { level?: number }): Uint8Array;
 }

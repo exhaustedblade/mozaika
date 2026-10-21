@@ -28,11 +28,18 @@ const LINE = { rightX: 18.5, topY: 11.2, rowGap: 1.2, rows: 7, perRow: 18, spaci
 /** Places of the line inside the hall; a longer line goes on outside the entrance. */
 export const LINE_PLACES_IN_HALL = LINE.rows * LINE.perRow;
 
+/** The line outside: rows along the front wall, away from the entrance, one behind another. */
+const STREET_LINE = { startX: -1.5, firstY: 2, rowGap: 1.2, perRow: 30 } as const;
+
 /** The entrance is in the left wall, the exit in the right one: from and to y. */
 export const DOORS = { entrance: { from: 1, to: 3 }, exit: { from: 11.5, to: 13.5 } } as const;
 
-/** Where people appear, outside the entrance, and where they disappear, outside the exit. */
-export const ENTRANCE: Point = { x: -1.5, y: 2 };
+/**
+ * Where people appear, on the threshold of the entrance, and where they
+ * disappear, outside the exit. A straight walk from the threshold to any
+ * place in the hall, or out to the line in the street, passes no wall.
+ */
+export const ENTRANCE: Point = { x: 0.3, y: 2 };
 export const EXIT: Point = { x: HALL.width + 1.5, y: 12.5 };
 
 /** Where a customer stands at window `index`. */
@@ -49,11 +56,16 @@ export function counterOf(index: number): { counter: Point; clerk: Point } {
 /**
  * The `place`-th place of the line, 0 at the head. Rows run in turn right to
  * left and left to right; past the places in the hall the line goes out of
- * the entrance and on along the street.
+ * the entrance and on in rows along the street.
  */
 export function lineSpot(place: number): Point {
   if (place >= LINE_PLACES_IN_HALL) {
-    return { x: ENTRANCE.x - LINE.spacing * (place - LINE_PLACES_IN_HALL), y: ENTRANCE.y };
+    const outside = place - LINE_PLACES_IN_HALL;
+    const row = Math.floor(outside / STREET_LINE.perRow);
+    return {
+      x: STREET_LINE.startX - LINE.spacing * (outside % STREET_LINE.perRow),
+      y: STREET_LINE.firstY - STREET_LINE.rowGap * row,
+    };
   }
   const row = Math.floor(place / LINE.perRow);
   const along = place % LINE.perRow;

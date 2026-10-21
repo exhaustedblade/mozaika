@@ -9,7 +9,9 @@ import type { Snapshot } from '@mozaika/kernel';
 
 import type { Messages } from '../i18n.js';
 import type { ServicePointParameters, ServicePointRecord } from '../models/service-point.js';
+import { MAX_WINDOWS } from '../models/service-point-layout.js';
 import { checkLaws, type LawName } from '../models/service-point-laws.js';
+import { LEGEND } from './person-states.js';
 
 /** A slider and what it changes: a parameter of the model, or the page's time scale. */
 interface Slider {
@@ -23,17 +25,8 @@ interface Slider {
 const SLIDERS: readonly Slider[] = [
   { key: 'arrivalsPerMinute', min: 0.2, max: 6, step: 0.1, digits: 1 },
   { key: 'serviceMinutes', min: 0.5, max: 10, step: 0.1, digits: 1 },
-  { key: 'windows', min: 1, max: 8, step: 1, digits: 0 },
+  { key: 'windows', min: 1, max: MAX_WINDOWS, step: 1, digits: 0 },
   { key: 'minutesPerSecond', min: 0.05, max: 3, step: 0.05, digits: 2 },
-];
-
-/** The states of a person in the order of their codes, with the key of their name and their colour. */
-export const PERSON_STATES: readonly { readonly name: keyof Messages; readonly colour: number }[] = [
-  { name: 'stateToLine', colour: 0x2a78d6 },
-  { name: 'stateInLine', colour: 0xeda100 },
-  { name: 'stateToWindow', colour: 0x1baf7a },
-  { name: 'stateServed', colour: 0x008300 },
-  { name: 'stateOut', colour: 0x6250d6 },
 ];
 
 const LAWS: readonly { readonly law: LawName; readonly text: keyof Messages }[] = [
@@ -42,6 +35,7 @@ const LAWS: readonly { readonly law: LawName; readonly text: keyof Messages }[] 
   { law: 'utilization', text: 'lawUtilization' },
 ];
 
+/** What the viewer does on the panel, for the page to act on. */
 export interface PanelEvents {
   /** A parameter the model reads while it runs. */
   readonly onParameter: (name: 'arrivalsPerMinute' | 'serviceMinutes', value: number) => void;
@@ -60,9 +54,14 @@ export interface Moment {
   readonly people: number;
   readonly inLine: number;
   readonly atWindows: number;
-  readonly windows: number;
+  /** Windows open in the model, by its latest record; undefined before the first. */
+  readonly windows: number | undefined;
 }
 
+/**
+ * The side panel: it shows what the page gives it (the moment, the latest
+ * record) and reports what the viewer changes through PanelEvents.
+ */
 export class DemoPanel {
   readonly element = document.createElement('aside');
   /** Where the page puts the charts. */
@@ -77,6 +76,8 @@ export class DemoPanel {
   readonly #language = document.createElement('button');
   readonly #events: PanelEvents;
   #messages: Messages;
+  /** Number formats by digits after the point, made once per language. */
+  #numbers = new Map<number, Intl.NumberFormat>();
   #paused = false;
   #parameters: ServicePointParameters;
 
@@ -102,6 +103,7 @@ export class DemoPanel {
   /** Shows the texts in another language. */
   translate(messages: Messages): void {
     this.#messages = messages;
+    this.#numbers = new Map();
     for (const [node, key] of this.#texts) node.textContent = messages[key];
     this.#pause.textContent = this.#paused ? messages.resume : messages.pause;
     this.#language.textContent = messages.switchLanguage;
@@ -115,7 +117,8 @@ export class DemoPanel {
     this.#show('time', `${String(hours)}:${String(minutes).padStart(2, '0')}`);
     this.#show('people', number.format(moment.people));
     this.#show('inLine', number.format(moment.inLine));
-    this.#show('windowsBusy', `${number.format(moment.atWindows)} / ${number.format(moment.windows)}`);
+    const windows = moment.windows === undefined ? '—' : number.format(moment.windows);
+    this.#show('windowsBusy', `${number.format(moment.atWindows)} / ${windows}`);
   }
 
   /** The laws on the latest record, and what it counts since the start. */
@@ -144,7 +147,7 @@ export class DemoPanel {
     const header = document.createElement('header');
     const top = document.createElement('div');
     top.className = 'demo-top';
-    const home = this.#text('a', 'benchBack') as HTMLAnchorElement;
+    const home = this.#text('a', 'backHome') as HTMLAnchorElement;
     home.href = './';
     this.#language.type = 'button';
     this.#language.className = 'lang-toggle';
@@ -160,12 +163,12 @@ export class DemoPanel {
     const section = this.#section('demoLegend');
     const list = document.createElement('ul');
     list.className = 'legend';
-    for (const state of PERSON_STATES) {
+    for (const entry of LEGEND) {
       const item = document.createElement('li');
       const swatch = document.createElement('span');
       swatch.className = 'swatch';
-      swatch.style.background = `#${state.colour.toString(16).padStart(6, '0')}`;
-      item.append(swatch, this.#text('span', state.name));
+      swatch.style.background = `#${entry.colour.toString(16).padStart(6, '0')}`;
+      item.append(swatch, this.#text('span', entry.name));
       list.append(item);
     }
     section.append(list);
@@ -309,6 +312,14 @@ export class DemoPanel {
   }
 
   #number(digits: number): Intl.NumberFormat {
-    return new Intl.NumberFormat(this.#messages.numberLocale, { minimumFractionDigits: digits, maximumFractionDigits: digits });
+    let format = this.#numbers.get(digits);
+    if (format === undefined) {
+      format = new Intl.NumberFormat(this.#messages.numberLocale, {
+        minimumFractionDigits: digits,
+        maximumFractionDigits: digits,
+      });
+      this.#numbers.set(digits, format);
+    }
+    return format;
   }
 }

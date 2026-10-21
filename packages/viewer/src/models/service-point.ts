@@ -13,10 +13,23 @@
  * Leaving through the Sink ends the time in the system; the person then walks
  * out of the hall and is removed on arriving at the door.
  *
+ * A window is the person's from the moment they are called: the walk to it
+ * is part of the service time, as it is for the M/M/c formulas. A service
+ * shorter than the walk (8 % of them at the defaults) ends on the way; the
+ * person then walks on to the window and only from there out, rather than
+ * turning back halfway.
+ *
  * Self-check: the laws of service-point-laws.ts hold on every record, and with
  * exponential times the model agrees with the M/M/c formulas (tests).
  */
-import { type Agent, AgentPopulation, defineStatechart, type Simulation, type SnapshotRecorder } from '@mozaika/kernel';
+import {
+  type Agent,
+  type AgentAction,
+  AgentPopulation,
+  defineStatechart,
+  type Simulation,
+  type SnapshotRecorder,
+} from '@mozaika/kernel';
 import { Queue, ResourcePool, Service, Sink, Source } from '@mozaika/blocks';
 import type { ModelDefinition } from '@mozaika/kernel/worker';
 
@@ -56,7 +69,7 @@ export type ServicePointRecord = {
   inLine: number;
   /** People at the windows now, walking to them or served. */
   atWindows: number;
-  /** People served who are walking out of the hall now, counted by their state. */
+  /** People who left the system and are walking out of the hall now (or on to their window first), by their state. */
   walkingOut: number;
   /** Agents in the population now. */
   people: number;
@@ -75,10 +88,24 @@ export type ServicePointRecord = {
   timeOfPresent: number;
 };
 
+/** The states of a person, as the statechart names them, in its order: where in the hall the person is. */
+export const PERSON_STATES = ['entering', 'waiting', 'toWindow', 'finishing', 'served', 'leaving', 'gone'] as const;
+
+export type PersonState = (typeof PERSON_STATES)[number];
+
+/** The states of the people who have left the system (through the Sink) but not yet the hall. */
+const OUT_OF_THE_SYSTEM: readonly PersonState[] = ['finishing', 'leaving'];
+
+const walkOut: AgentAction = ({ agent }) => {
+  agent.moveTo(EXIT, { speed: WALKING_SPEED });
+};
+
 /**
- * A person's way through the hall. The states only show it: the blocks send
- * `called` when a window is the person's, and `done` when its service ends;
- * arrivals of the walks move a person from walking to standing.
+ * A person's way through the hall. The blocks send `called` when a window
+ * is the person's and `done` when its service ends; the arrivals of the
+ * walks take a person from walking to standing. The statechart walks the
+ * person out once served: a person served on the way to the window walks on
+ * to it first (`finishing`).
  */
 const person = defineStatechart({
   id: 'person',
@@ -86,9 +113,10 @@ const person = defineStatechart({
   states: {
     entering: { on: { 'agent.arrived': 'waiting', called: 'toWindow' } },
     waiting: { on: { called: 'toWindow' } },
-    toWindow: { on: { 'agent.arrived': 'served', done: 'leaving' } },
+    toWindow: { on: { 'agent.arrived': 'served', done: 'finishing' } },
+    finishing: { on: { 'agent.arrived': 'leaving' } },
     served: { on: { done: 'leaving' } },
-    leaving: { on: { 'agent.arrived': 'gone' } },
+    leaving: { entry: walkOut, on: { 'agent.arrived': 'gone' } },
     gone: {
       type: 'final',
       entry: ({ agent }) => {
@@ -149,25 +177,21 @@ export function buildServicePoint(simulation: Simulation, parameters: Readonly<S
     capacity: open,
     duration: (random) => random.exponential(parameters.serviceMinutes),
     onEnter: ({ agent }) => {
-      const window = atWindow.indexOf(undefined);
-      if (window < 0) throw new Error(`Person #${String(agent.id)} entered the service with every window taken`);
-      atWindow[window] = agent;
+      const free = atWindow.indexOf(undefined);
+      if (free < 0) throw new Error(`Person #${String(agent.id)} entered the service with every window taken`);
+      atWindow[free] = agent;
       agent.send({ type: 'called' });
-      agent.moveTo(windowSpot(window), { speed: WALKING_SPEED });
+      agent.moveTo(windowSpot(free), { speed: WALKING_SPEED });
     },
     onExit: ({ agent }) => {
-      atWindow[atWindow.indexOf(agent)] = undefined;
+      const held = atWindow.indexOf(agent);
+      if (held < 0) throw new Error(`Person #${String(agent.id)} left the service without a window`);
+      atWindow[held] = undefined;
       agent.send({ type: 'done' });
     },
   });
-  // The person leaves the system here but stays in the population, to walk out of the hall.
-  const out = new Sink(simulation, {
-    name: 'out',
-    removeAgents: false,
-    onEnter: ({ agent }) => {
-      agent.moveTo(EXIT, { speed: WALKING_SPEED });
-    },
-  });
+  // The person leaves the system here but stays in the population: `done` makes the statechart walk them out.
+  const out = new Sink(simulation, { name: 'out', removeAgents: false });
   entrance.connect(line).connect(service).connect(out);
 
   const model = { simulation, people, entrance, line, service, windows, out };
@@ -180,10 +204,10 @@ function recordOf(model: Omit<ServicePoint, 'records'>, time: number): ServicePo
   const { people, entrance, line, service, windows, out } = model;
   const inLine = line.stats.length.current;
   const atWindows = service.stats.content.current;
-  const walkingOut = people.count('leaving');
+  const walkingOut = OUT_OF_THE_SYSTEM.reduce((count, state) => count + people.count(state), 0);
   let timeOfPresent = 0;
   for (const agent of people.agents) {
-    if (agent.state !== 'leaving') timeOfPresent += time - agent.createdAt;
+    if (!(OUT_OF_THE_SYSTEM as readonly string[]).includes(agent.state)) timeOfPresent += time - agent.createdAt;
   }
   const leftTimes = out.stats.timeInSystem;
   return {

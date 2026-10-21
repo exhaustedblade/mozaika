@@ -49,6 +49,27 @@ describe('snapshot feed', () => {
     expect(requests).toEqual(['run', 'snapshot', 'release', 'run', 'snapshot', 'release']);
   });
 
+  it('asks for nothing while the frames stand at the time of the latest snapshot, as when paused', async () => {
+    const { client, requests } = await builtWalkway();
+    const feed = new SnapshotFeed(client, {
+      minInterval: 0,
+      onSnapshot: () => undefined,
+      onError: (error) => {
+        throw error;
+      },
+    });
+    feed.frame(3, 0);
+    await replies();
+    for (let frame = 1; frame <= 5; frame++) {
+      feed.frame(3, frame * 100);
+      await replies();
+    }
+    expect(requests).toEqual(['run', 'snapshot', 'release']);
+    feed.frame(3.5, 600);
+    await replies();
+    expect(requests).toHaveLength(6);
+  });
+
   it('gives the buffers of each snapshot back as soon as it is taken in, so the kernel never runs out', async () => {
     const { client } = await builtWalkway();
     const errors: unknown[] = [];

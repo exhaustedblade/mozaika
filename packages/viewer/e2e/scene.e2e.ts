@@ -62,11 +62,14 @@ test('the demo builds the model anew with another number of windows', async ({ p
   const errors = pageErrors(page);
   await page.goto('demo.html?lang=ru');
   await page.locator('input[name="minutesPerSecond"]').fill('2');
-  await expect.poll(() => figure(page, 'Обслужено'), { timeout: 60_000 }).toBeGreaterThan(0);
+  await page.locator('input[name="arrivalsPerMinute"]').fill('3');
+  const windowsBusy = page.locator('.figures div', { hasText: 'Занято окон' }).locator('dd');
+  // The windows open are the model's own, from its records: five by default.
+  await expect(windowsBusy).toHaveText(/\/ 5$/, { timeout: 60_000 });
   await page.locator('input[name="windows"]').fill('2');
-  await expect(page.locator('.figures div', { hasText: 'Занято окон' }).locator('dd')).toHaveText(/\/ 2$/, {
-    timeout: 30_000,
-  });
+  await expect(windowsBusy).toHaveText(/\/ 2$/, { timeout: 60_000 });
+  // A busy flow keeps both windows busy, and never more than both.
+  await expect(windowsBusy).toHaveText(/^2 \/ 2$/, { timeout: 60_000 });
   expect(errors).toEqual([]);
 });
 
@@ -91,7 +94,10 @@ for (const agents of BENCH_AGENTS) {
     const errors = pageErrors(page);
     const scripts = loadedScripts(page);
     await page.goto(`bench.html?agents=${String(agents)}&seconds=10&lang=ru`);
-    await page.waitForFunction(() => window.mozaikaBench !== undefined, null, { timeout: 200_000 });
+    // Done, or failed: a page that cannot measure fails the test at once rather than at its timeout.
+    const finished = page.locator('.bench-panel[data-state="done"], .bench-panel[data-state="failed"], [role="alert"]');
+    await expect(finished.first()).toBeVisible({ timeout: 200_000 });
+    await expect(page.locator('.bench-panel')).toHaveAttribute('data-state', 'done');
     const result: BenchResult | undefined = await page.evaluate(() => window.mozaikaBench);
     expect(result?.agents).toBe(agents);
     await expectDrawn(page, `bench-${String(agents)}`);

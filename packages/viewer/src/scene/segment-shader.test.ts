@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import { positionsAt } from '../motion-view.js';
 import { walkway, WALKWAY_DEFAULTS } from '../walkway.js';
-import { SEGMENT_POSITION_GLSL, shaderPositions } from './segment-shader.js';
+import { SEGMENT_POSITION_GLSL, SEGMENT_WIDTH, shaderPositions } from './segment-shader.js';
 
 /**
  * The formula the vertex shader leads agents by (docs/ARCHITECTURE.md,
@@ -11,22 +11,27 @@ import { SEGMENT_POSITION_GLSL, shaderPositions } from './segment-shader.js';
  * Float32 as the shader does: it must agree with positionsAt of the 2D check
  * and with the kernel's own positions, to the precision of Float32. The
  * shader itself runs on a graphics card in the Playwright test
- * (e2e/shader.spec.ts), against the same twin.
+ * (e2e/shader.e2e.ts), against the same twin.
  */
 
-/** Numbers per agent in snapshot.segments. */
-const SEGMENT = 6;
+const SEGMENT = SEGMENT_WIDTH;
 
 /**
- * A few units in the last place of Float32 at the size of the coordinate: the
- * twin rounds after every step, positionsAt once at the end, and a graphics
- * card may fuse a multiplication and an addition.
+ * A few units in the last place of Float32 at the size of the operands, the
+ * ends of the segment: the twin rounds after every step and positionsAt once
+ * at the end, so a step that cancels (from 9 000 towards 10 gives about 100)
+ * keeps the error of the larger numbers.
  */
-function expectFloat32Close(actual: number, expected: number, what: string): void {
-  const ulp = 2 ** -23 * Math.max(1, Math.abs(expected));
+function expectFloat32Close(actual: number, expected: number, operands: number, what: string): void {
+  const ulp = 2 ** -23 * Math.max(1, operands);
   expect(Math.abs(actual - expected), `${what}: ${String(actual)} against ${String(expected)}`).toBeLessThanOrEqual(
     8 * ulp,
   );
+}
+
+/** The size of the ends of the segment in `row` along `axis` (0: x, 1: y): what the error scales with. */
+function operandsOf(segments: Float32Array, row: number, axis: number): number {
+  return Math.max(Math.abs(segments[SEGMENT * row + axis] ?? 0), Math.abs(segments[SEGMENT * row + 2 + axis] ?? 0));
 }
 
 /** A snapshot of hand-made segments, as the kernel writes them: start and arrival from the snapshot time. */
@@ -110,7 +115,8 @@ describe('the formula of the shader', () => {
     for (const time of [45, 45.01, 45.5, 47, 52, 60, 200, 44.9, 40]) {
       const { shader, reference } = bothAt(snapshot, time);
       shader.forEach((value, index) => {
-        expectFloat32Close(value, reference[index] ?? Number.NaN, `t = ${String(time)}, coordinate ${String(index)}`);
+        const operands = operandsOf(snapshot.segments, Math.floor(index / 2), index % 2);
+        expectFloat32Close(value, reference[index] ?? Number.NaN, operands, `t = ${String(time)}, coordinate ${String(index)}`);
       });
     }
   });
@@ -139,7 +145,8 @@ describe('the formula of the shader', () => {
       else arrived++;
       for (const axis of [0, 1]) {
         const value = fromBefore[2 * old + axis] ?? Number.NaN;
-        expectFloat32Close(value, kernel[2 * row + axis] ?? Number.NaN, `agent ${String(id)}, axis ${String(axis)}`);
+        const operands = operandsOf(before.segments, old, axis);
+        expectFloat32Close(value, kernel[2 * row + axis] ?? Number.NaN, operands, `agent ${String(id)}, axis ${String(axis)}`);
       }
     });
     // Both cases are there: agents still on their way, and agents that arrived and stand.

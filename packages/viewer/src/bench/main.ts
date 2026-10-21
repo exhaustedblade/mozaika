@@ -50,7 +50,10 @@ function readSettings(): Settings {
   return { agents, seconds, locale };
 }
 
-/** The panel over the scene: what is measured, the figures and the result. */
+/**
+ * The panel over the scene: what is measured, the figures and the result.
+ * Its `data-state` — warm-up, measuring, done or failed — tells a test where the page is.
+ */
 class Panel {
   readonly element = document.createElement('aside');
   readonly #figures = new Map<keyof Messages, HTMLElement>();
@@ -80,7 +83,7 @@ class Panel {
     }
     const home = document.createElement('a');
     home.href = './';
-    home.textContent = t.benchBack;
+    home.textContent = t.backHome;
     links.append(home);
     const list = document.createElement('dl');
     const rows: (keyof Messages)[] = [
@@ -114,19 +117,27 @@ class Panel {
     if (figure !== undefined) figure.textContent = value;
   }
 
-  progress(text: string): void {
+  /** Where the measurement is: shown in words, and kept in `data-state`. */
+  phase(state: 'warm-up' | 'measuring', text: string): void {
+    this.element.dataset.state = state;
+    this.#progress.textContent = text;
+  }
+
+  /** The page cannot measure: says why. */
+  fail(text: string): void {
+    this.element.dataset.state = 'failed';
     this.#progress.textContent = text;
   }
 
   /** Shows the figures of the result and a button that copies it all as JSON, to send. */
   finish(result: BenchResult): void {
-    this.show('benchFps', format(result.framesPerSecond));
-    this.show('benchFrameInterval', pair(result.frameInterval));
-    this.show('benchFrameWork', pair(result.frameWork));
-    this.show('benchSnapshot', pair(result.snapshotInWorker));
-    this.show('benchRun', pair(result.runInWorker));
-    this.show('benchUpload', pair(result.upload));
-    this.show('benchSnapshotsPerSecond', format(result.snapshotsPerSecond));
+    this.show('benchFps', this.#format(result.framesPerSecond, 1));
+    this.show('benchFrameInterval', this.#pair(result.frameInterval));
+    this.show('benchFrameWork', this.#pair(result.frameWork));
+    this.show('benchSnapshot', this.#pair(result.snapshotInWorker));
+    this.show('benchRun', this.#pair(result.runInWorker));
+    this.show('benchUpload', this.#pair(result.upload));
+    this.show('benchSnapshotsPerSecond', this.#format(result.snapshotsPerSecond, 1));
     const json = JSON.stringify(result, null, 2);
     const copy = document.createElement('button');
     copy.type = 'button';
@@ -139,15 +150,22 @@ class Panel {
     const text = document.createElement('pre');
     text.textContent = json;
     this.#result.replaceChildren(copy, text);
+    this.#progress.textContent = this.#t.benchProgressDone;
+    this.element.dataset.state = 'done';
   }
-}
 
-function format(value: number, digits = 1): string {
-  return Number.isFinite(value) ? value.toFixed(digits) : '—';
-}
+  #format(value: number, digits: number): string {
+    if (!Number.isFinite(value)) return '—';
+    const format = new Intl.NumberFormat(this.#t.numberLocale, {
+      minimumFractionDigits: digits,
+      maximumFractionDigits: digits,
+    });
+    return format.format(value);
+  }
 
-function pair(summary: Summary): string {
-  return `${format(summary.median, 2)} / ${format(summary.p95, 2)}`;
+  #pair(summary: Summary): string {
+    return `${this.#format(summary.median, 2)} / ${this.#format(summary.p95, 2)}`;
+  }
 }
 
 /** Warm-up, then measuring, then the result; the frames go on after it. */
@@ -215,17 +233,16 @@ async function start(root: HTMLElement): Promise<void> {
 
   const worker = new Worker(new URL('../kernel-worker.ts', import.meta.url), { type: 'module' });
   const client = new KernelClient(worker);
-  panel.progress(t.benchProgressWarmUp);
+  panel.phase('warm-up', t.benchProgressWarmUp);
   await client.build('crowd', SEED, { agents: settings.agents });
 
   const measurement = new Measurement(settings.seconds, (phase, seconds, snapshots) => {
     if (phase === 'measuring') {
-      panel.progress(t.benchProgressMeasuring);
+      panel.phase('measuring', t.benchProgressMeasuring);
       return;
     }
     const result = summary(stage, settings, measurement.samples, seconds, snapshots);
     window.mozaikaBench = result;
-    panel.progress(t.benchProgressDone);
     panel.finish(result);
   });
   const { samples } = measurement;
@@ -250,7 +267,7 @@ async function start(root: HTMLElement): Promise<void> {
       measurement.frame(now);
     },
     onError: (error) => {
-      panel.progress(error instanceof Error ? error.message : String(error));
+      panel.fail(error instanceof Error ? error.message : String(error));
     },
   });
   view.start();

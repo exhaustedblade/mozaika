@@ -16,6 +16,7 @@ export interface ChartPoint {
   readonly sinceStart: number | undefined;
 }
 
+/** The points of the three charts of the demo at one record. */
 export interface ChartPoints {
   /** People in the line, time-averaged. */
   readonly queue: ChartPoint;

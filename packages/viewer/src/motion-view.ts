@@ -7,8 +7,7 @@
  */
 import type { PopulationSnapshot } from '@mozaika/kernel';
 
-/** Numbers per agent in snapshot.segments: from x, y, to x, y, start, arrival (the last two from the snapshot time). */
-const SEGMENT = 6;
+import { SEGMENT_WIDTH } from './scene/segment-shader.js';
 
 /**
  * Writes the position of every agent of `snapshot` at model time `time` into
@@ -21,7 +20,7 @@ export function positionsAt(snapshot: PopulationSnapshot, time: number, into: Fl
   const segments = snapshot.segments;
   const since = time - snapshot.time;
   for (let row = 0; row < snapshot.size; row++) {
-    const cell = row * SEGMENT;
+    const cell = row * SEGMENT_WIDTH;
     const fromX = segments[cell] ?? 0;
     const fromY = segments[cell + 1] ?? 0;
     const toX = segments[cell + 2] ?? 0;

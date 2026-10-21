@@ -12,6 +12,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 
 import {
   buildServicePoint,
+  PERSON_STATES,
   SERVICE_POINT_DEFAULTS,
   servicePoint,
   type ServicePointParameters,
@@ -41,25 +42,29 @@ const SCENARIOS: readonly Scenario[] = [
   // More arrive than the windows serve: the line grows past the places in the hall.
   { name: 'an overload (ρ = 3)', parameters: { arrivalsPerMinute: 2.4, windows: 2, serviceMinutes: 2.5 } },
   { name: 'all the windows, a light flow', parameters: { arrivalsPerMinute: 0.4, windows: 8, serviceMinutes: 4 } },
+  // Service shorter than the walk to the window: most are served on the way and walk on to the window first.
+  { name: 'a quick service', parameters: { arrivalsPerMinute: 3, windows: 2, serviceMinutes: 0.1 } },
 ];
 
 function samePoint(a: { x: number; y: number }, b: { x: number; y: number }): boolean {
   return a.x === b.x && a.y === b.y;
 }
 
-/** Where each person of a snapshot is going (the end of the segment), by state. */
-function targetsByState(
-  snapshot: PopulationSnapshot,
-  stateNames: readonly string[],
-): Map<string, { x: number; y: number }[]> {
-  const targets = new Map<string, { x: number; y: number }[]>(stateNames.map((name) => [name, []]));
+interface Walk {
+  readonly from: { x: number; y: number };
+  readonly to: { x: number; y: number };
+}
+
+/** Where each person of a snapshot walks from and to (its segment), by state. */
+function walksByState(snapshot: PopulationSnapshot, stateNames: readonly string[]): Map<string, Walk[]> {
+  const walks = new Map<string, Walk[]>(stateNames.map((name) => [name, []]));
+  const at = (cell: number): number => snapshot.segments[cell] ?? Number.NaN;
   for (let row = 0; row < snapshot.size; row++) {
     const state = stateNames[snapshot.states[row] ?? 0] ?? '?';
-    const x = snapshot.segments[6 * row + 2] ?? Number.NaN;
-    const y = snapshot.segments[6 * row + 3] ?? Number.NaN;
-    targets.get(state)?.push({ x, y });
+    const cell = 6 * row;
+    walks.get(state)?.push({ from: { x: at(cell), y: at(cell + 1) }, to: { x: at(cell + 2), y: at(cell + 3) } });
   }
-  return targets;
+  return walks;
 }
 
 /** Points in a fixed order, so that two lists of the same points compare equal. */
@@ -76,35 +81,44 @@ describe.each(SCENARIOS)('service point: $name', ({ parameters }) => {
   it('has people walk to the places of the line, to free windows and out, as the blocks move them', () => {
     const model = buildServicePoint(new Simulation({ seed: SEED }), parameters);
     const snapshots = new PopulationSnapshots(model.people);
-    // A person in the last state, gone, is no longer in the population.
-    const stateNames = model.people.statechart.stateNames.filter((state) => state !== 'gone');
-    const open = Array.from({ length: parameters.windows }, (_, window) => inFloat32(windowSpot(window)));
+    const stateNames = model.people.statechart.stateNames;
+    const open = Array.from({ length: parameters.windows }, (_, index) => inFloat32(windowSpot(index)));
+    const atAWindow = (point: { x: number; y: number }): boolean => open.some((spot) => samePoint(spot, point));
     const seen = new Set<string>();
     for (let time = 0.5; time <= 240; time += 0.5) {
       model.simulation.run(time);
       const snapshot = snapshots.take();
       if (snapshot === undefined) throw new Error('no snapshot');
-      const targets = targetsByState(snapshot, stateNames);
-      const inLine = [...(targets.get('entering') ?? []), ...(targets.get('waiting') ?? [])];
-      const atWindows = [...(targets.get('toWindow') ?? []), ...(targets.get('served') ?? [])];
+      const walks = walksByState(snapshot, stateNames);
+      const targets = (...states: string[]): { x: number; y: number }[] =>
+        states.flatMap((state) => (walks.get(state) ?? []).map((walk) => walk.to));
 
       // The k-th person of the line stands at (or walks to) the k-th place, in the order they came.
       const places = Array.from({ length: model.line.stats.length.current }, (_, place) => inFloat32(lineSpot(place)));
-      expect(sorted(inLine)).toEqual(sorted(places));
+      expect(sorted(targets('entering', 'waiting'))).toEqual(sorted(places));
       // Each person served has a window of their own, one of those open.
+      const atWindows = targets('toWindow', 'served');
       expect(atWindows).toHaveLength(model.windows.busy);
-      for (const target of atWindows) expect(open.some((spot) => samePoint(spot, target))).toBe(true);
+      expect(atWindows.every(atAWindow)).toBe(true);
       expect(new Set(atWindows.map(({ x, y }) => `${String(x)},${String(y)}`)).size).toBe(atWindows.length);
-      // Those served go out through the exit.
-      for (const target of targets.get('leaving') ?? []) expect(target).toEqual(inFloat32(EXIT));
+      // Served on the way, a person still walks on to the window; everyone leaves from a window, through the exit.
+      expect(targets('finishing').every(atAWindow)).toBe(true);
+      for (const walk of walks.get('leaving') ?? []) {
+        expect(walk.to).toEqual(inFloat32(EXIT));
+        expect(atAWindow(walk.from)).toBe(true);
+      }
 
-      for (const [state, list] of targets) if (list.length > 0) seen.add(state);
+      for (const [state, list] of walks) if (list.length > 0) seen.add(state);
       snapshots.giveBack(snapshot);
     }
-    // Every stage of the way is seen; on a light flow nobody needs to wait in line.
+    // Every stage of the way is seen, the line on a busy flow, being served on the way when the service is
+    // quick; a person who is gone is no longer in the population.
     const load = (parameters.arrivalsPerMinute * parameters.serviceMinutes) / parameters.windows;
-    const expected = load >= 0.5 ? stateNames : stateNames.filter((state) => !['entering', 'waiting'].includes(state));
-    expect([...seen].sort()).toEqual([...expected].sort());
+    const expected = ['toWindow', 'served', 'leaving'];
+    if (load >= 0.5) expected.push('entering', 'waiting');
+    if (parameters.serviceMinutes < 0.5) expected.push('finishing');
+    for (const state of expected) expect(seen, state).toContain(state);
+    expect(seen).not.toContain('gone');
   });
 
   it('keeps its laws on every record: balance, Little on the sample path, windows busy within bounds', () => {
@@ -121,6 +135,13 @@ describe.each(SCENARIOS)('service point: $name', ({ parameters }) => {
     if (parameters.arrivalsPerMinute * parameters.serviceMinutes > parameters.windows) {
       expect(last?.inLine).toBeGreaterThan(200);
     }
+  });
+});
+
+describe('service point', () => {
+  it('names the states of a person as its statechart does, in the same order', () => {
+    const model = buildServicePoint(new Simulation({ seed: SEED }), SERVICE_POINT_DEFAULTS);
+    expect(model.people.statechart.stateNames).toEqual(PERSON_STATES);
   });
 });
 

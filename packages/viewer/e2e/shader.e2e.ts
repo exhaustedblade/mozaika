@@ -6,10 +6,7 @@
  */
 import { expect, test } from '@playwright/test';
 
-import { SEGMENT_POSITION_GLSL, shaderPositions } from '../src/scene/segment-shader.js';
-
-/** Numbers per agent: from x, y, to x, y, start, arrival (from the snapshot). */
-const SEGMENT = 6;
+import { SEGMENT_POSITION_GLSL, SEGMENT_WIDTH as SEGMENT, shaderPositions } from '../src/scene/segment-shader.js';
 
 /** Segments of every kind: walking, standing, not begun yet, of no duration, far from the origin. */
 function segments(count: number): Float32Array {
@@ -117,8 +114,17 @@ test('the shader puts agents where its twin in TypeScript does, to the precision
     expect(gpu).toHaveLength(2 * count);
     let worst = 0;
     twin.forEach((expected, cell) => {
-      // A few units in the last place of Float32: a graphics card may fuse a multiplication and an addition.
-      const ulp = 2 ** -23 * Math.max(1, Math.abs(expected));
+      // A few units in the last place of Float32 at the size of the segment's ends, not of the result: a
+      // graphics card may fuse a multiplication and an addition, or divide by a reciprocal, and where
+      // the result cancels (from 9 000 towards 10 gives about 100) the error is that of the larger numbers.
+      const row = Math.floor(cell / 2);
+      const axis = cell % 2;
+      const operands = Math.max(
+        1,
+        Math.abs(input[SEGMENT * row + axis] ?? 0),
+        Math.abs(input[SEGMENT * row + 2 + axis] ?? 0),
+      );
+      const ulp = 2 ** -23 * operands;
       worst = Math.max(worst, Math.abs((gpu[cell] ?? Number.NaN) - expected) / ulp);
     });
     expect(worst, `since = ${String(since)}: the largest difference, in units in the last place`).toBeLessThanOrEqual(8);

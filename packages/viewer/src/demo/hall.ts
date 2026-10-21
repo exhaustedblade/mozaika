@@ -35,6 +35,7 @@ const COLOURS = {
   mat: '#6f6b63',
 } as const;
 
+/** The hall around the people: built once, its windows opened again for each model run. */
 export class Hall {
   readonly #stage: Stage;
   readonly #materials: Record<keyof typeof COLOURS, StandardMaterial>;
@@ -55,34 +56,36 @@ export class Hall {
   openWindows(open: number): void {
     for (const mesh of this.#windows) mesh.dispose();
     this.#windows = [];
-    for (let window = 0; window < MAX_WINDOWS; window++) {
-      const { counter, clerk } = counterOf(window);
-      const isOpen = window < open;
+    for (let index = 0; index < MAX_WINDOWS; index++) {
+      const { counter, clerk } = counterOf(index);
+      const isOpen = index < open;
       this.#windows.push(
         this.#box(
-          `counter ${String(window)}`,
+          `counter ${String(index)}`,
           counter,
           { x: COUNTER.width, y: COUNTER.depth, height: COUNTER.height },
           isOpen ? 'counterOpen' : 'counterClosed',
         ),
       );
-      if (isOpen) this.#windows.push(this.#clerk(window, clerk));
+      if (isOpen) this.#windows.push(this.#clerk(index, clerk));
     }
   }
 
   #ground(): void {
     const scene = this.#stage.scene;
     const centre = { x: HALL.width / 2, y: HALL.depth / 2 };
-    const street = CreateGround('street', { width: HALL.width + 60, height: HALL.depth + 40 }, scene);
-    street.position = toWorld(centre, -0.02);
+    // Wide enough for a long line in the street, which goes on in rows along the front of the hall.
+    const street = CreateGround('street', { width: HALL.width + 160, height: HALL.depth + 160 }, scene);
+    street.position = toWorld(centre, -0.03);
     street.material = this.#materials.street;
     const floor = CreateGround('floor', { width: HALL.width, height: HALL.depth }, scene);
     floor.position = toWorld(centre);
     floor.material = this.#materials.floor;
     const entrance = (DOORS.entrance.from + DOORS.entrance.to) / 2;
     const exit = (DOORS.exit.from + DOORS.exit.to) / 2;
-    this.#box('entrance mat', { x: 0.7, y: entrance }, { x: 1.4, y: 2, height: 0.01 }, 'mat');
-    this.#box('exit mat', { x: HALL.width - 0.7, y: exit }, { x: 1.4, y: 2, height: 0.01 }, 'mat');
+    // Mats 2 cm high: a thinner box would flicker against the floor when the camera is far.
+    this.#box('entrance mat', { x: 0.7, y: entrance }, { x: 1.4, y: 2, height: 0.02 }, 'mat');
+    this.#box('exit mat', { x: HALL.width - 0.7, y: exit }, { x: 1.4, y: 2, height: 0.02 }, 'mat');
   }
 
   /** Full walls behind and at the sides, with the doors; a low one in front, so the camera sees in. */
@@ -96,11 +99,11 @@ export class Hall {
     this.#wallAlongY('right wall', width, 0, DOORS.exit.from);
     this.#wallAlongY('right wall', width, DOORS.exit.to, depth);
     // Partitions between the windows, from the counters back to the wall.
-    for (let window = 0; window <= MAX_WINDOWS; window++) {
-      const { counter } = counterOf(window);
+    for (let index = 0; index <= MAX_WINDOWS; index++) {
+      const { counter } = counterOf(index);
       const x = counter.x - COUNTER.width / 2 - 0.2;
       const fromY = counter.y - COUNTER.depth / 2;
-      this.#box(`partition ${String(window)}`, { x, y: (fromY + depth) / 2 }, { x: 0.08, y: depth - fromY, height: 1.7 }, 'wall');
+      this.#box(`partition ${String(index)}`, { x, y: (fromY + depth) / 2 }, { x: 0.08, y: depth - fromY, height: 1.7 }, 'wall');
     }
   }
 
@@ -158,9 +161,9 @@ export class Hall {
     return box;
   }
 
-  #clerk(window: number, at: Point): Mesh {
+  #clerk(index: number, at: Point): Mesh {
     const person = personMesh();
-    const clerk = new Mesh(`clerk ${String(window)}`, this.#stage.scene);
+    const clerk = new Mesh(`clerk ${String(index)}`, this.#stage.scene);
     const data = new VertexData();
     data.positions = person.positions;
     data.normals = person.normals;

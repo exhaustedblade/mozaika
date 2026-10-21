@@ -10,6 +10,7 @@ import type { RanReply, SnapshotReply } from '@mozaika/kernel/worker';
 
 import type { KernelClient, Timed } from './kernel-client.js';
 
+/** How often to ask for snapshots, and what to do with them and with failures. */
 export interface SnapshotFeedOptions {
   /** Fewest milliseconds between two requests for a snapshot. */
   readonly minInterval: number;
@@ -23,6 +24,7 @@ export interface SnapshotFeedOptions {
   readonly onError: (error: unknown) => void;
 }
 
+/** Asks the kernel for snapshots as frames need them; see the module comment. */
 export class SnapshotFeed {
   readonly #client: KernelClient;
   readonly #options: SnapshotFeedOptions;
@@ -44,10 +46,12 @@ export class SnapshotFeed {
 
   /**
    * Called on every frame with the frame's model time and the real time in
-   * milliseconds: asks for the next snapshot if it is due.
+   * milliseconds: asks for the next snapshot if it is due. A frame at the
+   * time of the latest snapshot, e.g. while paused, needs none.
    */
   frame(until: number, now: number): void {
-    if (this.#onItsWay || this.#failed || now - this.#askedAt < this.#options.minInterval) return;
+    if (this.#onItsWay || this.#failed || until === this.#latest) return;
+    if (now - this.#askedAt < this.#options.minInterval) return;
     this.#onItsWay = true;
     this.#askedAt = now;
     // Both requests at once: the worker answers them in order, so the snapshot is taken at `until`.

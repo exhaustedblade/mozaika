@@ -21,8 +21,11 @@ vec2 segmentPosition(vec4 fromTo, vec2 times, float since) {
 }
 `;
 
-/** Numbers per agent in the segments of a snapshot. */
-const SEGMENT = 6;
+/**
+ * Numbers per agent in the segments of a snapshot: from x, y, to x, y, start
+ * and arrival (the last two from the snapshot time), as the kernel writes them.
+ */
+export const SEGMENT_WIDTH = 6;
 
 /**
  * The twin of SEGMENT_POSITION_GLSL: writes the positions of the first `size`
@@ -33,7 +36,7 @@ export function shaderPositions(segments: Float32Array, size: number, since: num
   const f = Math.fround;
   const at = f(since);
   for (let row = 0; row < size; row++) {
-    const cell = row * SEGMENT;
+    const cell = row * SEGMENT_WIDTH;
     const fromX = segments[cell] ?? 0;
     const fromY = segments[cell + 1] ?? 0;
     const toX = segments[cell + 2] ?? 0;

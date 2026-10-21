@@ -25,6 +25,7 @@ export interface Frame {
   readonly work: number;
 }
 
+/** What the frames draw, from what, and whom they tell what happened. */
 export interface LiveViewOptions {
   readonly stage: Stage;
   /** The agents of the model's first population. */
@@ -39,6 +40,11 @@ export interface LiveViewOptions {
   readonly onError: (error: unknown) => void;
 }
 
+/**
+ * The frames of one model run: start() draws a frame on every animation
+ * frame of the browser until stop(); a frame that fails stops them and is
+ * reported through onError.
+ */
 export class LiveView {
   readonly #options: LiveViewOptions;
   readonly #feed: SnapshotFeed;
@@ -67,11 +73,13 @@ export class LiveView {
     });
   }
 
+  /** Starts drawing frames. */
   start(): void {
     this.#running = true;
     this.#frameRequest = requestAnimationFrame(this.#frame);
   }
 
+  /** Stops drawing frames; a snapshot still on its way is given back and not drawn. */
   stop(): void {
     this.#running = false;
     cancelAnimationFrame(this.#frameRequest);
@@ -79,15 +87,26 @@ export class LiveView {
 
   readonly #frame = (now: number): void => {
     if (!this.#running) return;
+    try {
+      this.#draw(now);
+    } catch (error) {
+      // A frame that throws would throw again on the next one: stop and say why, rather than freeze silently.
+      this.stop();
+      this.#options.onError(error);
+      return;
+    }
+    this.#frameRequest = requestAnimationFrame(this.#frame);
+  };
+
+  #draw(now: number): void {
     const started = performance.now();
     const { stage, agents, clock } = this.#options;
     const interval = this.#last === undefined ? 0 : now - this.#last;
     this.#last = now;
     const time = clock.tick(interval / 1000, this.#feed.latest);
     this.#feed.frame(time, now);
-    agents.since = this.#snapshotTime === undefined ? 0 : time - this.#snapshotTime;
+    agents.setSince(this.#snapshotTime === undefined ? 0 : time - this.#snapshotTime);
     stage.render();
     this.#options.onFrame?.({ now, interval, time, work: performance.now() - started });
-    this.#frameRequest = requestAnimationFrame(this.#frame);
-  };
+  }
 }

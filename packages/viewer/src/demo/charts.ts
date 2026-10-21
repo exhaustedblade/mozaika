@@ -176,6 +176,7 @@ class Chart {
   }
 }
 
+/** The three charts of the demo, in one element the panel shows. */
 export class DemoCharts {
   readonly element = document.createElement('div');
   readonly #charts: ReadonlyMap<Measure, Chart>;

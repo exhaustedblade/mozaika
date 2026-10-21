@@ -13,8 +13,10 @@ import type { ServicePointRecord } from './service-point.js';
  */
 const ROUNDING = 1e-9;
 
+/** The laws of the service point, by name (checkLaws). */
 export type LawName = 'balance' | 'little' | 'utilization';
 
+/** One law checked on one record. */
 export interface LawCheck {
   readonly law: LawName;
   readonly holds: boolean;

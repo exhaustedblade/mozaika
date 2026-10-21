@@ -4,12 +4,14 @@
  * summary when CI gives one (GITHUB_STEP_SUMMARY).
  */
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
 
 import type { Page } from '@playwright/test';
 
-export const RESULTS = new URL('./results/', import.meta.url).pathname;
-const DIST = new URL('../dist/', import.meta.url).pathname;
+// File paths, not URL paths: those would keep %-escapes of spaces and Cyrillic, and a leading / before C: on Windows.
+export const RESULTS = fileURLToPath(new URL('./results/', import.meta.url));
+const DIST = fileURLToPath(new URL('../dist/', import.meta.url));
 
 /** Saves `data` as results/<name>.json. */
 export function saveResult(name: string, data: unknown): void {

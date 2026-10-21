@@ -50,7 +50,7 @@ const ru = {
   benchSnapshotsPerSecond: 'Снимков в секунду',
   benchCopy: 'Скопировать итог',
   benchCopied: 'Скопировано',
-  benchBack: 'На главную',
+  backHome: 'На главную',
   noWebgl:
     'Этот браузер не умеет WebGL 2, поэтому 3D-сцену показать нельзя. Обновите браузер или включите аппаратное ускорение графики в его настройках.',
   pagesTitle: 'Страницы превью',
@@ -100,7 +100,7 @@ const en: Messages = {
   title: 'Mozaika',
   subtitle: 'Open simulation modelling environment',
   status:
-    'The time kernel (F0-2), process blocks (F0-3), agents with statecharts (F0-4), the kernel on typed arrays (F0-4b), blocks on kernel events with agents as entities (F0-4c) agents that move, with snapshots for a viewer (F0-6a), and the 3D scene with the demo of a service point (F0-6b) are ready. Desktop shells, system dynamics and MCP control arrive in the next Phase\u00a00 tasks.',
+    'The time kernel (F0-2), process blocks (F0-3), agents with statecharts (F0-4), the kernel on typed arrays (F0-4b), blocks on kernel events with agents as entities (F0-4c), agents that move, with snapshots for a viewer (F0-6a), and the 3D scene with the demo of a service point (F0-6b) are ready. Desktop shells, system dynamics and MCP control arrive in the next Phase\u00a00 tasks.',
   kernel: 'Kernel',
   build: 'Build',
   localBuild: 'local',
@@ -142,7 +142,7 @@ const en: Messages = {
   benchSnapshotsPerSecond: 'Snapshots per second',
   benchCopy: 'Copy the result',
   benchCopied: 'Copied',
-  benchBack: 'Home',
+  backHome: 'Home',
   noWebgl:
     'This browser has no WebGL 2, so the 3D scene cannot be shown. Update the browser or turn on hardware acceleration of graphics in its settings.',
   pagesTitle: 'Preview pages',
