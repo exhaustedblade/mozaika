@@ -52,6 +52,22 @@
 | ИИ | официальный MCP SDK (TypeScript) | MIT |
 | Графика для сцен | бесплатные модели CC0 (Kenney, Quaternius, Poly Haven) | CC0 |
 
+### Инструменты разработки
+
+Подключены в каркасе (Ф0-1), лицензии проверены 21.10.2026, у всех свежие релизы. Это инструменты сборки и проверки, в продукт они не попадают.
+
+| Инструмент | Зачем | Лицензия |
+|---|---|---|
+| pnpm 12 | менеджер пакетов, monorepo (workspaces) | MIT |
+| TypeScript 6.0 | язык и проверка типов (strict) | Apache-2.0 |
+| Vite 8 | сборка и локальный запуск viewer | MIT |
+| Vitest 5 | тесты | MIT |
+| ESLint 10, @eslint/js, typescript-eslint 8 | линтер | MIT |
+| GitHub Actions: actions/checkout, actions/setup-node, actions/upload-artifact, actions/download-artifact, pnpm/action-setup | CI и превью | MIT |
+
+- **Транзитивные зависимости** (124 пакета): MIT, Apache-2.0, BSD-2/3-Clause, ISC, BlueOak-1.0.0. Исключение — `lightningcss` (сжатие CSS внутри Vite) под MPL-2.0. Это слабый копилефт на уровне файлов: как инструмент использовать можно, условия касаются только правки его собственных файлов.
+- **TypeScript 6.0, а не 7:** TypeScript 7 (июль 2026) пока не поддерживается typescript-eslint.
+
 ## 3. Чем современнее AnyLogic
 
 - **ИИ с первого дня:** модель по описанию, рисунку, данным; ИИ проверяет её сам.
