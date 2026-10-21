@@ -13,7 +13,6 @@ describe('@mozaika/blocks', () => {
     expect(Object.keys(blocks).sort()).toEqual([
       'DEPENDS_ON',
       'Delay',
-      'Entity',
       'PACKAGE_NAME',
       'Queue',
       'ResourcePool',

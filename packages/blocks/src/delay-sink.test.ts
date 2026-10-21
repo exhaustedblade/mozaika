@@ -49,7 +49,7 @@ describe('Delay', () => {
     const source = new Source(sim, { name: 'arrivals', interval: 1, limit: 1 });
     source.connect(new Delay(sim, { name: 'walk', duration: () => Infinity })).connect(new Recorder(sim));
     expect(() => sim.run()).toThrow(
-      simulationError('PROCESS_FAILED', {
+      simulationError('EVENT_FAILED', {
         cause: simulationError('NOT_FINITE', { message: containing('"walk"') }),
       }),
     );

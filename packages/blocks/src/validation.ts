@@ -48,6 +48,13 @@ export function requireLimit(value: unknown, what: string, minimum: number): num
   return value === Infinity ? Infinity : requireWholeNumber(value, what, minimum);
 }
 
+/** A yes-or-no option; `fallback` when it is not given. */
+export function requireBoolean(value: unknown, what: string, fallback: boolean): boolean {
+  if (value === undefined) return fallback;
+  if (typeof value === 'boolean') return value;
+  throw new SimulationError('INVALID_ARGUMENT', `${what} must be true or false, got ${describeValue(value)}`);
+}
+
 /** The name of a block: a non-empty string. `kind` is the block type, e.g. "Queue". */
 export function requireName(value: unknown, kind: string): string {
   if (typeof value !== 'string' || value === '') {

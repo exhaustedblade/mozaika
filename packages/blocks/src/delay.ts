@@ -1,7 +1,9 @@
-import { type ProcessBody, type Simulation, timeout } from '@mozaika/kernel';
+import type { Agent, Simulation } from '@mozaika/kernel';
+import { EventKind } from '@mozaika/kernel/extension';
 
-import { type EntityReceiver, HoldingBlock, type HoldingBlockOptions } from './block.js';
+import { HoldingBlock, type HoldingBlockOptions } from './block.js';
 import { type Distribution, TimeSampler } from './distribution.js';
+import { describeEntity } from './entity.js';
 import { blockStream, registerBlockName } from './registry.js';
 import { TimeAverage } from './statistics.js';
 
@@ -12,8 +14,9 @@ export interface DelayOptions extends HoldingBlockOptions {
 
 /**
  * Delays entities without a resource: each one on its own, however many there
- * are (docs/BLOCKS.md, section 6). After its delay, an entity waits in the
- * block until the next block has room.
+ * are (docs/BLOCKS.md, section 6). The block's events are the ends of the
+ * delays; after its delay, an entity waits in the block until the next block
+ * has room.
  */
 export class Delay extends HoldingBlock {
   readonly stats: {
@@ -22,6 +25,7 @@ export class Delay extends HoldingBlock {
   };
   readonly #content: TimeAverage;
   readonly #duration: TimeSampler;
+  readonly #delayEnds: EventKind;
 
   constructor(simulation: Simulation, options: DelayOptions) {
     super(simulation, 'Delay', options);
@@ -32,20 +36,28 @@ export class Delay extends HoldingBlock {
     );
     this.#content = new TimeAverage(simulation);
     this.stats = { content: this.#content };
+    this.#delayEnds = new EventKind(simulation, {
+      fire: (row) => {
+        this.leaveWhenNextHasRoom(row);
+      },
+      label: (row) => `${this.name}: ${describeEntity(this.entities.agentOrUndefined(row))} delay ends`,
+    });
     registerBlockName(simulation, this.name);
   }
 
-  /** The delay does not depend on the entity, so it does not look at it. */
-  override *enter(): ProcessBody<EntityReceiver> {
+  /** The entity's delay is drawn as it enters. */
+  override enter(agent: Agent): void {
+    const row = this.hold(agent);
     this.#content.add(1);
-    yield timeout(this.#duration.next());
-    const next = yield* this.reserveNext();
-    this.#content.add(-1);
-    this.freePlace();
-    return next;
+    this.runEntryAction(row);
+    this.#delayEnds.schedule(this.#duration.next(), row, 0);
   }
 
   override resetStatistics(): void {
     this.#content.reset();
+  }
+
+  protected override letGo(): void {
+    this.#content.add(-1);
   }
 }

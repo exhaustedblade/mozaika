@@ -4,10 +4,10 @@
  */
 import { DEFAULT_PRIORITY } from '../event-queue.js';
 import type { Random } from '../random.js';
-import { type EventKind, type Scheduler, schedulerOf } from '../scheduler.js';
+import { type EventKindHandler, type Scheduler, schedulerOf } from '../scheduler.js';
 import type { Simulation } from '../simulation.js';
 import { grown } from '../typed-arrays.js';
-import { type Agent, agentFriend, REMOVED } from './agent.js';
+import { type Agent, agentFriend, removedPlace } from './agent.js';
 import type { StateNode, Timer } from './compile.js';
 import type { AgentEvent } from './definition.js';
 import { AgentMessages } from './messages.js';
@@ -56,11 +56,10 @@ export class AgentStore<TContext extends object> {
   readonly #timerLabels: readonly string[];
   /** Number of agents in each state, by state code. */
   readonly #counts: number[];
-  #created = 0;
+  /** The number of the last agent created; the next one gets a larger number. */
+  #lastId = 0;
   /** Agents that asked to be removed during their own step: they leave when it ends. */
   readonly #leaving = new Set<Agent<TContext>>();
-  /** The state each removed agent was in, so that it can still tell it. */
-  readonly #removedStates = new WeakMap<Agent<TContext>, StateNode<TContext>>();
 
   constructor(population: AgentPopulation<TContext>) {
     this.population = population;
@@ -95,9 +94,9 @@ export class AgentStore<TContext extends object> {
     return this.#agents;
   }
 
-  /** The id the next agent gets: ids count every agent created, removed ones included. */
+  /** The smallest id the next agent may get, and the one it gets by default. */
   get nextId(): number {
-    return this.#created + 1;
+    return this.#lastId + 1;
   }
 
   /** Adds a row for an agent in the initial state and returns its place. */
@@ -105,7 +104,7 @@ export class AgentStore<TContext extends object> {
     const index = this.#agents.length;
     if (index === this.#ids.length) this.#grow();
     this.#agents.push(agent);
-    this.#created++;
+    this.#lastId = agent.id;
     this.#ids[index] = agent.id;
     const code = this.statechart.initial.code;
     this.#codes[index] = code;
@@ -123,11 +122,10 @@ export class AgentStore<TContext extends object> {
     this.cancelTimers(index);
     const state = this.stateAt(index);
     this.#counts[state.code] = (this.#counts[state.code] ?? 0) - 1;
-    this.#removedStates.set(agent, state);
     const last = this.#agents.length - 1;
     if (index !== last) this.#moveRow(last, index);
     this.#agents.pop();
-    agentFriend.moveTo(agent, REMOVED);
+    agentFriend.moveTo(agent, removedPlace(state.code));
   }
 
   /** Asks to remove an agent at the end of its step; returns false if it has asked already. */
@@ -148,9 +146,9 @@ export class AgentStore<TContext extends object> {
     return state;
   }
 
-  removedStateOf(agent: Agent<TContext>): StateNode<TContext> {
-    const state = this.#removedStates.get(agent);
-    if (state === undefined) throw new Error(`AgentStore "${this.name}": agent ${String(agent.id)} was not removed`);
+  stateWithCode(code: number): StateNode<TContext> {
+    const state = this.statechart.states[code];
+    if (state === undefined) throw new Error(`AgentStore "${this.name}": no state with code ${String(code)}`);
     return state;
   }
 
@@ -253,7 +251,7 @@ export class AgentStore<TContext extends object> {
 }
 
 /** Timeouts of the agents of one population: `target` is the agent's row, `data` the timer's index. */
-class AgentTimeouts<TContext extends object> implements EventKind {
+class AgentTimeouts<TContext extends object> implements EventKindHandler {
   readonly #store: AgentStore<TContext>;
 
   constructor(store: AgentStore<TContext>) {

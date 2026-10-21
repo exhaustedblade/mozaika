@@ -1,8 +1,8 @@
 import { type ProcessBody, Simulation, timeout } from '@mozaika/kernel';
 import { describe, expect, it } from 'vitest';
 
-import { ResourcePool } from './resource-pool.js';
-import { containing, simulationError } from './test-support/helpers.js';
+import { ResourcePool, Service, Source } from './index.js';
+import { containing, Recorder, simulationError } from './test-support/helpers.js';
 
 /**
  * A process that asks for a unit at `requestAt`, holds it for `holdFor` and
@@ -142,5 +142,116 @@ describe('ResourcePool', () => {
     }
     expect(() => new ResourcePool(sim, { capacity: Number.NaN })).toThrow(simulationError('NOT_A_NUMBER'));
     expect(() => new ResourcePool(sim, { capacity: Infinity })).toThrow(simulationError('NOT_FINITE'));
+  });
+});
+
+/**
+ * A Service fed by a source of entities at the given times: the entities ask
+ * the pool for a unit on arrival, and `log` records when each starts service
+ * (the service time is drawn then).
+ */
+function serviceArrivingAt(sim: Simulation, pool: ResourcePool, log: string[], times: readonly number[], duration = 1): Recorder {
+  let previous = 0;
+  const intervals = times.map((time) => {
+    const interval = time - previous;
+    previous = time;
+    return interval;
+  });
+  let next = 0;
+  const source = new Source(sim, { name: 'arrivals', interval: () => intervals[next++] ?? 0, limit: times.length });
+  let started = 0;
+  return source
+    .connect(
+      new Service(sim, {
+        name: 'desk',
+        pool,
+        duration: () => {
+          started++;
+          log.push(`entity ${String(started)} seized at ${String(sim.now)}`);
+          return duration;
+        },
+      }),
+    )
+    .connect(new Recorder(sim));
+}
+
+describe('ResourcePool shared by blocks and processes', () => {
+  it('serves blocks and processes in one queue, in the order they asked', () => {
+    const sim = new Simulation();
+    const pool = new ResourcePool(sim, { name: 'clerk', capacity: 1 });
+    const log: string[] = [];
+    sim.process(worker(sim, pool, log, 'holder', 0, 5)); // releases at 5
+    serviceArrivingAt(sim, pool, log, [1, 2]); // the entities ask at 1 and 2
+    sim.process(worker(sim, pool, log, 'process', 1.5, 1)); // the process asks between them
+    sim.run();
+    expect(log).toEqual([
+      'holder seized at 0',
+      'entity 1 seized at 5',
+      'process seized at 6',
+      'entity 2 seized at 7',
+    ]);
+  });
+
+  it('gives a released unit to a waiting process, not to an entity arriving at the same moment', () => {
+    const sim = new Simulation();
+    const pool = new ResourcePool(sim, { name: 'clerk', capacity: 1 });
+    const log: string[] = [];
+    sim.process(worker(sim, pool, log, 'holder', 0, 5)); // releases at 5
+    sim.process(worker(sim, pool, log, 'waiter', 1, 1));
+    serviceArrivingAt(sim, pool, log, [5]);
+    sim.run();
+    expect(log).toEqual(['holder seized at 0', 'waiter seized at 5', 'entity 1 seized at 6']);
+  });
+
+  it('gives a released unit to a waiting entity, not to a process asking at the same moment', () => {
+    const sim = new Simulation();
+    const pool = new ResourcePool(sim, { name: 'clerk', capacity: 1 });
+    const log: string[] = [];
+    sim.process(worker(sim, pool, log, 'holder', 0, 5)); // releases at 5
+    serviceArrivingAt(sim, pool, log, [1]);
+    // The newcomer asks at 5 after the release (priority 1 puts it after the other events of that moment).
+    sim.process(worker(sim, pool, log, 'newcomer', 5, 1, 1));
+    sim.run();
+    expect(log).toEqual(['holder seized at 0', 'entity 1 seized at 5', 'newcomer seized at 6']);
+  });
+
+  it('lets blocks and processes go on in the order their units were granted', () => {
+    for (const processFirst of [true, false]) {
+      const sim = new Simulation();
+      const pool = new ResourcePool(sim, { name: 'clerks', capacity: 2 });
+      const log: string[] = [];
+      function* holder(): ProcessBody {
+        yield* pool.seize();
+        yield* pool.seize();
+        yield timeout(5);
+        pool.release();
+        pool.release();
+      }
+      sim.process(holder());
+      // Both wait from before 5 and get their units at 5: they go on in the order they asked.
+      sim.process(worker(sim, pool, log, 'process', processFirst ? 1 : 3, 1));
+      serviceArrivingAt(sim, pool, log, [2]);
+      sim.run();
+      expect(log).toEqual(processFirst ? ['process seized at 5', 'entity 1 seized at 5'] : ['entity 1 seized at 5', 'process seized at 5']);
+    }
+  });
+
+  it('lets an entity that finds a free unit go on after a process granted one earlier at the same moment', () => {
+    const sim = new Simulation();
+    const pool = new ResourcePool(sim, { name: 'clerks', capacity: 2 });
+    const log: string[] = [];
+    function* holder(): ProcessBody {
+      yield* pool.seize();
+      yield* pool.seize();
+      yield timeout(5);
+      pool.release(); // goes to the waiter, who has not gone on yet
+      pool.release(); // becomes free
+    }
+    sim.process(holder());
+    sim.process(worker(sim, pool, log, 'waiter', 1, 1));
+    // Arrives at 5 after the releases and takes the free unit, but goes on after the waiter.
+    serviceArrivingAt(sim, pool, log, [5]);
+    sim.run();
+    expect(log).toEqual(['waiter seized at 5', 'entity 1 seized at 5']);
   });
 });

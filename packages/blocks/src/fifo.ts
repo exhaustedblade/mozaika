@@ -16,6 +16,11 @@ export class Fifo<T> {
     return this.#items.length - this.#head;
   }
 
+  /** The first item, left in the queue; undefined if the queue is empty. */
+  get first(): T | undefined {
+    return this.size === 0 ? undefined : this.#items[this.#head];
+  }
+
   push(item: T): void {
     this.#items.push(item);
   }

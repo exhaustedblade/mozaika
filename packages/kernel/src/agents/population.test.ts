@@ -106,6 +106,35 @@ describe('agent populations', () => {
     expect([...ids]).toEqual([1, 2, 3]);
   });
 
+  it('gives an agent the number it is created with, and counts on from it', () => {
+    const sim = new Simulation({ seed: 4 });
+    const chart = defineStatechart({ initial: 'a', context: ({ id }) => ({ label: `agent ${String(id)}` }), states: { a: {} } });
+    const agents = new AgentPopulation(sim, { name: 'agents', statechart: chart });
+    agents.add();
+    const fifth = agents.add({}, { id: 5 });
+    const next = agents.add();
+    const later = agents.add(undefined, { id: 2 ** 40 });
+    expect([fifth.id, next.id, later.id]).toEqual([5, 6, 2 ** 40]);
+    // The field function sees the number too, and the column has it.
+    expect(fifth.context.label).toBe('agent 5');
+    expect([...agents.ids()]).toEqual([1, 5, 6, 2 ** 40]);
+    // Numbers only grow in the order of creation, so a removed agent's number is never reused.
+    agents.remove(later);
+    expect(agents.add().id).toBe(2 ** 40 + 1);
+  });
+
+  it('refuses a number at creation that is not above every earlier one', () => {
+    const sim = new Simulation();
+    const agents = new AgentPopulation(sim, { name: 'agents', statechart: twoStates });
+    agents.add({}, { id: 3 });
+    for (const id of [3, 2, 0, -1, 4.5, Number.NaN, Infinity, Number.MAX_SAFE_INTEGER + 1, '7']) {
+      expect(() => agents.add({}, { id: id as number })).toThrow(simulationError('INVALID_ARGUMENT'));
+    }
+    // A refused number creates no agent and uses up no number.
+    expect(agents.size).toBe(1);
+    expect(agents.add().id).toBe(4);
+  });
+
   it('refuses invalid options and calls', () => {
     const sim = new Simulation();
     expect(() => new AgentPopulation(sim, { name: '', statechart: twoStates })).toThrow(

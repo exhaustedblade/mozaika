@@ -1,8 +1,8 @@
 /** Assertions and helpers shared by the block tests. Not part of the package build. */
-import { type ProcessBody, type Simulation, type SimulationErrorCode } from '@mozaika/kernel';
+import type { Agent, Simulation, SimulationErrorCode } from '@mozaika/kernel';
 import { expect } from 'vitest';
 
-import type { Entity, EntityReceiver } from '../index.js';
+import type { EntityReceiver, RequestOutcome } from '../index.js';
 
 /** Matches a SimulationError with the given code and, optionally, other fields such as `cause`. */
 export function simulationError(code: SimulationErrorCode, fields: object = {}): unknown {
@@ -22,14 +22,14 @@ export interface Visit {
 
 /**
  * The end of a flow that remembers which entities reached it and when, so
- * tests can check the order. It also shows that model code can implement
- * EntityReceiver itself.
+ * tests can check the order. Unlike a Sink, it leaves the agents in their
+ * population. It also shows that model code can implement EntityReceiver itself.
  */
 export class Recorder implements EntityReceiver {
   readonly simulation: Simulation;
   readonly name: string;
   readonly visits: Visit[] = [];
-  readonly entities: Entity[] = [];
+  readonly entities: Agent[] = [];
 
   constructor(simulation: Simulation, name = 'recorder') {
     this.simulation = simulation;
@@ -41,18 +41,16 @@ export class Recorder implements EntityReceiver {
     return this.visits.map((visit) => visit.id);
   }
 
-  tryReserve(): boolean {
-    return true;
+  tryReserve(): RequestOutcome {
+    return 'granted'; // there is always room
   }
 
-  *reserve(): ProcessBody {
-    // There is always room: nothing to wait for.
+  reserve(): RequestOutcome {
+    return 'granted';
   }
 
-  // eslint-disable-next-line require-yield -- the receiver protocol expects a generator, even one that never waits
-  *enter(entity: Entity): ProcessBody<undefined> {
-    this.visits.push({ id: entity.id, time: this.simulation.now });
-    this.entities.push(entity);
-    return undefined;
+  enter(agent: Agent): void {
+    this.visits.push({ id: agent.id, time: this.simulation.now });
+    this.entities.push(agent);
   }
 }

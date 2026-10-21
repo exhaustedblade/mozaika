@@ -1,17 +1,29 @@
-import type { ProcessBody, Simulation } from '@mozaika/kernel';
+import type { Agent, Simulation } from '@mozaika/kernel';
 
-import type { EntityReceiver } from './block.js';
-import type { Entity } from './entity.js';
+import { type BlockAction, requireAction, runAction } from './actions.js';
+import type { EntityReceiver, RequestOutcome } from './block.js';
 import { registerBlockName } from './registry.js';
 import { Tally } from './statistics.js';
-import { requireName } from './validation.js';
+import { requireBoolean, requireName } from './validation.js';
 
 export interface SinkOptions {
   /** Unique within the simulation. */
   readonly name: string;
+  /** Runs when an entity enters, before the agent is removed (docs/BLOCKS.md, section 8). */
+  readonly onEnter?: BlockAction;
+  /**
+   * Whether to remove the agent from its population; default true. With
+   * false, the agent stays and goes on living by its statechart.
+   */
+  readonly removeAgents?: boolean;
 }
 
-/** Takes entities out of the model and counts them; always has room (docs/BLOCKS.md, section 7). */
+/**
+ * Takes entities out of the model and counts them; always has room
+ * (docs/BLOCKS.md, section 7). By default it removes each agent from its
+ * population (П-31), so a flow of agents does not pile up in memory, and the
+ * columns of a population hold just the agents still in the model.
+ */
 export class Sink implements EntityReceiver {
   readonly simulation: Simulation;
   readonly name: string;
@@ -19,11 +31,15 @@ export class Sink implements EntityReceiver {
     /** Time from creation at the source to leaving through this sink. */
     readonly timeInSystem: Tally;
   };
+  readonly #onEnter: BlockAction | undefined;
+  readonly #removeAgents: boolean;
   #count = 0;
 
   constructor(simulation: Simulation, options: SinkOptions) {
     this.simulation = simulation;
     this.name = requireName(options.name, 'Sink');
+    this.#onEnter = requireAction(options.onEnter, `Sink "${this.name}" onEnter`);
+    this.#removeAgents = requireBoolean(options.removeAgents, `Sink "${this.name}" removeAgents`, true);
     this.stats = { timeInSystem: new Tally() };
     registerBlockName(simulation, this.name);
   }
@@ -33,19 +49,20 @@ export class Sink implements EntityReceiver {
     return this.#count;
   }
 
-  tryReserve(): boolean {
-    return true;
+  /** A sink always has room. */
+  tryReserve(): RequestOutcome {
+    return 'granted';
   }
 
-  *reserve(): ProcessBody {
-    // A sink always has room: nothing to wait for.
+  reserve(): RequestOutcome {
+    return 'granted';
   }
 
-  // eslint-disable-next-line require-yield -- the receiver protocol expects a generator, even one that never waits
-  *enter(entity: Entity): ProcessBody<undefined> {
+  enter(agent: Agent): void {
     this.#count++;
-    this.stats.timeInSystem.add(this.simulation.now - entity.createdAt);
-    return undefined;
+    this.stats.timeInSystem.add(this.simulation.now - agent.createdAt);
+    runAction(this.#onEnter, agent, this);
+    if (this.#removeAgents) agent.population.remove(agent);
   }
 
   /** Starts the statistics again from now (e.g. after a warm-up); the count goes on. */

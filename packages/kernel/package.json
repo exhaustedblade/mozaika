@@ -10,6 +10,11 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./extension": {
+      "@mozaika/source": "./src/extension.ts",
+      "types": "./dist/extension.d.ts",
+      "default": "./dist/extension.js"
+    },
     "./test-support": {
       "@mozaika/source": "./src/test-support/index.ts"
     }
