@@ -80,15 +80,16 @@ jobs:
               measure branch $round .; measure main $round ../main-ab
             fi
           done
-      - name: CPU profiles of the crowded Delay (temporary)
+      - name: CPU profiles of the crowded Delay and M/M/1 (temporary)
         shell: bash
         run: |
+          for bench in crowded-delay mm1; do
           for side in main branch; do
             if [ "$side" = main ]; then dir=../main-ab; else dir=.; fi
             for flags in "" "--no-turbo-inlining"; do
               rm -rf "/tmp/prof-$side"
-              (cd "$dir/packages/blocks" && node --expose-gc $flags --cpu-prof --cpu-prof-dir="/tmp/prof-$side" bench/crowded-delay.ts > /dev/null)
-              echo "PROFILE $side $flags"
+              (cd "$dir/packages/blocks" && node --expose-gc $flags --cpu-prof --cpu-prof-dir="/tmp/prof-$side" bench/$bench.ts > /dev/null)
+              echo "PROFILE $bench $side $flags"
               python3 - "/tmp/prof-$side" <<'PY'
           import collections, glob, json, sys
           profile = json.load(open(glob.glob(sys.argv[1] + '/*.cpuprofile')[0]))
@@ -102,6 +103,7 @@ jobs:
               print(f'PROF {100 * time / total:5.1f}% {name}')
           PY
             done
+          done
           done
 
   build:
