@@ -1,7 +1,7 @@
 import { Random, Simulation } from '@mozaika/kernel';
 import { describe, expect, it } from 'vitest';
 
-import { Delay, ResourcePool, Service, Sink, Source } from './index.js';
+import { Delay, Entity, ResourcePool, Service, Sink, Source } from './index.js';
 import { containing, Recorder, simulationError } from './test-support/helpers.js';
 
 describe('Source', () => {
@@ -74,6 +74,61 @@ describe('Source', () => {
     expect(source.lost).toBe(4);
   });
 
+  it('makes each entity with its factory, given the id and the creation time', () => {
+    class Customer extends Entity {
+      readonly vip: boolean;
+      constructor(id: number, createdAt: number) {
+        super(id, createdAt);
+        this.vip = id % 2 === 0;
+      }
+    }
+    const sim = new Simulation();
+    const source = new Source(sim, {
+      name: 'arrivals',
+      interval: 2,
+      limit: 3,
+      entity: (id, createdAt) => new Customer(id, createdAt),
+    });
+    const recorder = source.connect(new Recorder(sim));
+    sim.run();
+    expect(recorder.entities.map((entity) => entity instanceof Customer && entity.vip)).toEqual([false, true, false]);
+    expect(recorder.visits).toEqual([
+      { id: 1, time: 2 },
+      { id: 2, time: 4 },
+      { id: 3, time: 6 },
+    ]);
+  });
+
+  it('calls the factory only for arrivals that get in; lost ones still use up their ids', () => {
+    const sim = new Simulation();
+    const made: number[] = [];
+    const source = new Source(sim, {
+      name: 'arrivals',
+      interval: 1,
+      limit: 6,
+      entity: (id, createdAt) => {
+        made.push(id);
+        return new Entity(id, createdAt);
+      },
+    });
+    // The same booth as in the test above: arrivals 1 and 4 get in.
+    source.connect(new Delay(sim, { name: 'booth', duration: 2.5, capacity: 1 })).connect(new Recorder(sim));
+    sim.run();
+    expect(made).toEqual([1, 4]);
+    expect(source.lost).toBe(4);
+  });
+
+  it('fails when the factory does not return an entity', () => {
+    const sim = new Simulation();
+    const source = new Source(sim, { name: 'arrivals', interval: 1, entity: () => undefined as unknown as Entity });
+    source.connect(new Recorder(sim));
+    expect(() => sim.run()).toThrow(
+      simulationError('PROCESS_FAILED', {
+        cause: simulationError('INVALID_ARGUMENT', { message: containing('entity factory') }),
+      }),
+    );
+  });
+
   it('stops after the limit and creates nothing for a limit of zero', () => {
     const sim = new Simulation();
     const silent = new Source(sim, { name: 'silent', interval: 1, limit: 0 });
@@ -90,6 +145,9 @@ describe('Source', () => {
     expect(() => new Source(sim, { name: 'b', interval: Number.NaN })).toThrow(simulationError('NOT_A_NUMBER'));
     expect(() => new Source(sim, { name: 'c', interval: 1, limit: 2.5 })).toThrow(simulationError('INVALID_ARGUMENT'));
     expect(() => new Source(sim, { name: 'd', interval: 1, limit: -1 })).toThrow(simulationError('INVALID_ARGUMENT'));
+    expect(() => new Source(sim, { name: 'e', interval: 1, entity: 'customer' as unknown as () => Entity })).toThrow(
+      simulationError('INVALID_ARGUMENT'),
+    );
   });
 
   it('refuses an interval drawn from the distribution that is negative', () => {
