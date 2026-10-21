@@ -28,7 +28,13 @@ export type SimulationErrorCode =
   /** An event action threw; the original error is the `cause`. */
   | 'EVENT_FAILED'
   /** A process body threw; the original error is the `cause`. */
-  | 'PROCESS_FAILED';
+  | 'PROCESS_FAILED'
+  /**
+   * An agent failed to take a step: one of its actions, guards or delays threw
+   * or gave a bad value, or its eventless transitions looped. The original
+   * error is the `cause`.
+   */
+  | 'AGENT_FAILED';
 
 export class SimulationError extends Error {
   override readonly name = 'SimulationError';

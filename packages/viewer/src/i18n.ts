@@ -8,7 +8,7 @@ const ru = {
   title: 'Мозаика',
   subtitle: 'Открытая среда имитационного моделирования',
   status:
-    'Готово ядро времени (задача Ф0-2): очередь событий, процессы, случайные числа с seed. Блоки, сцена и управление через MCP появятся в следующих задачах Фазы\u00a00.',
+    'Готовы ядро времени (Ф0-2), блоки процессов (Ф0-3) и агенты с диаграммами состояний (Ф0-4). Системная динамика, сцена и управление через MCP появятся в следующих задачах Фазы\u00a00.',
   kernel: 'Ядро',
   build: 'Сборка',
   localBuild: 'локальная',
@@ -21,7 +21,7 @@ const en: Messages = {
   title: 'Mozaika',
   subtitle: 'Open simulation modelling environment',
   status:
-    'The time kernel is ready (task F0-2): event queue, processes, seeded random numbers. Blocks, the scene and MCP control arrive in the next Phase\u00a00 tasks.',
+    'The time kernel (F0-2), process blocks (F0-3) and agents with statecharts (F0-4) are ready. System dynamics, the scene and MCP control arrive in the next Phase\u00a00 tasks.',
   kernel: 'Kernel',
   build: 'Build',
   localBuild: 'local',

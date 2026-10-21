@@ -19,5 +19,5 @@ export { Queue, type QueueOptions } from './queue.js';
 export { ResourcePool, type ResourcePoolOptions } from './resource-pool.js';
 export { Service, type ServiceOptions } from './service.js';
 export { Sink, type SinkOptions } from './sink.js';
-export { Source, type SourceOptions } from './source.js';
+export { type EntityFactory, Source, type SourceOptions } from './source.js';
 export { Tally, TimeAverage } from './statistics.js';

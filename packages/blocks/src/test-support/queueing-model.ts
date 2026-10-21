@@ -3,9 +3,9 @@
  * replications for the statistical tests. Not part of the package build.
  */
 import { Random, Simulation } from '@mozaika/kernel';
+import { REPLICATIONS } from '@mozaika/kernel/test-support';
 
 import { ResourcePool, Service, Sink, Source } from '../index.js';
-import { REPLICATIONS } from './confidence-interval.js';
 
 export interface QueueingParameters {
   /** λ: mean number of arrivals per unit of time (Poisson arrivals). */

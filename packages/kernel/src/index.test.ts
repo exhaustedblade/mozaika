@@ -9,6 +9,9 @@ describe('@mozaika/kernel', () => {
 
   it('exports the public API and nothing internal', () => {
     expect(Object.keys(kernel).sort()).toEqual([
+      'Agent',
+      'AgentPopulation',
+      'MAX_STATES',
       'PACKAGE_NAME',
       'Process',
       'Random',
@@ -16,7 +19,10 @@ describe('@mozaika/kernel', () => {
       'SignalWait',
       'Simulation',
       'SimulationError',
+      'Statechart',
       'Timeout',
+      'defineStatechart',
+      'rate',
       'timeout',
     ]);
   });

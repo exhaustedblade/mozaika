@@ -10,7 +10,7 @@ import { expectLittlesLaw, expectMeasuresInIntervals } from './test-support/theo
  * 20 independent replications, each with its own random stream
  * new Random(SEED, ['replication', k]); each starts empty, discards a warm-up
  * and measures over a window; the formula must lie in the 99.9 % t-interval of
- * the 20 window averages (see test-support/confidence-interval.ts).
+ * the 20 window averages (see @mozaika/kernel/test-support).
  *
  * Time unit: the mean service time (μ = 1).
  *
@@ -20,7 +20,8 @@ import { expectLittlesLaw, expectMeasuresInIntervals } from './test-support/theo
  * initial bias is below e⁻¹³ ≈ 2 · 10⁻⁶ of the transient: negligible.
  *
  * Window: long enough that the typical half-width is about 5 % of the value,
- * half the bound MAX_RELATIVE_HALF_WIDTH that the checks enforce (theory-checks.ts).
+ * half the bound MAX_RELATIVE_HALF_WIDTH that the checks enforce
+ * (@mozaika/kernel/test-support).
  */
 const SEED = 20_261_021;
 const SERVICE_RATE = 1;

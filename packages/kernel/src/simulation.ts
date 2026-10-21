@@ -274,8 +274,10 @@ function requireTimeLimit(value: number, what: string): number {
 
 /** Wraps an error thrown by an event action with the event's name and time. */
 function describeFailure(event: ScheduledEvent, error: unknown): SimulationError {
-  // A failed process has already said which process failed and when.
-  if (error instanceof SimulationError && error.code === 'PROCESS_FAILED') return error;
+  // A failed process or agent has already said which one failed and when.
+  if (error instanceof SimulationError && (error.code === 'PROCESS_FAILED' || error.code === 'AGENT_FAILED')) {
+    return error;
+  }
   const name = event.label === undefined ? 'Event' : `Event "${event.label}"`;
   return new SimulationError('EVENT_FAILED', `${name} failed at time ${String(event.time)}: ${messageOf(error)}`, {
     cause: error,
