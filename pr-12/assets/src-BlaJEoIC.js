@@ -1,1 +1,0 @@
-import{o as e,s as t}from"./segment-shader-BrEhYtoW.js";var n=Object.freeze({});t({id:`entity`,description:`A simple entity of the process blocks: one state, no fields.`,initial:`active`,context:()=>n,states:{active:{}}}),e(0);
