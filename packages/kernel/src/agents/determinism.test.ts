@@ -110,7 +110,10 @@ describe('agents: repeatability by seed', () => {
     // since then (П-29), so the number is taken out of them before comparing.
     const { trace } = runTown(2026, { withVisitors: true });
     const withoutAgents = trace.map((line) => line.replace(/ (people|visitors)#\d+: /, ' $1: '));
-    expect({ events: trace.length, fingerprint: fingerprint(withoutAgents) }).toEqual({ events: 2631, fingerprint: '7539411b' });
+    expect({ events: trace.length, fingerprint: fingerprint(withoutAgents) }).toEqual({
+      events: 2631,
+      fingerprint: '7539411b',
+    });
   });
 
   it('gives an identical trace for the same seed when agents are removed and added', () => {

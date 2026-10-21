@@ -10,18 +10,16 @@
  *
  * The kernel renders nothing and reads no wall-clock time: a run depends only
  * on the model and its seed.
+ *
+ * The events themselves — their records, queue and kinds — are kept by the
+ * Scheduler (scheduler.ts); this class is the model's view of them.
  */
 
-import {
-  DEFAULT_PRIORITY,
-  type EventHandle,
-  type EventInfo,
-  EventQueue,
-  type ScheduledEvent,
-} from './event-queue.js';
-import { messageOf, requireDelay, requireFinite, requireFunction, SimulationError } from './errors.js';
+import { requireDelay, requireFinite, requireFunction, SimulationError } from './errors.js';
+import { DEFAULT_PRIORITY, type EventHandle, type EventInfo } from './event-queue.js';
 import { Process, type ProcessBody, type ProcessOptions } from './process.js';
 import { Random } from './random.js';
+import { provideSchedulers, Scheduler } from './scheduler.js';
 import { Signal } from './signal.js';
 import { type JsonValue, type SnapshotOptions, type SnapshotRecorder, SnapshotSchedule } from './snapshots.js';
 
@@ -64,10 +62,9 @@ export interface RunResult {
 
 export class Simulation {
   readonly random: Random;
-  readonly #queue = new EventQueue();
+  readonly #scheduler: Scheduler;
   readonly #recorders: SnapshotSchedule<JsonValue>[] = [];
   readonly #trace: ((event: EventInfo) => void) | undefined;
-  #now: number;
   #eventsProcessed = 0;
   #processCount = 0;
   #running = false;
@@ -80,18 +77,22 @@ export class Simulation {
       throw new SimulationError('INVALID_ARGUMENT', 'Simulation takes either a seed or a random stream, not both');
     }
     this.random = options.random ?? new Random(options.seed ?? 0);
-    this.#now = requireFinite(options.startTime ?? 0, 'Simulation startTime');
+    this.#scheduler = new Scheduler(requireFinite(options.startTime ?? 0, 'Simulation startTime'));
     this.#trace = options.trace === undefined ? undefined : requireFunction(options.trace, 'Simulation trace');
+  }
+
+  static {
+    provideSchedulers((simulation) => simulation.#scheduler);
   }
 
   /** Current model time. */
   get now(): number {
-    return this.#now;
+    return this.#scheduler.now;
   }
 
-  /** Number of events waiting to fire (cancelled ones excluded). */
+  /** Number of events waiting to fire (cancelled ones are removed at once). */
   get pendingEvents(): number {
-    return this.#queue.size;
+    return this.#scheduler.pendingEvents;
   }
 
   /** Number of events fired since the simulation was created. */
@@ -106,22 +107,22 @@ export class Simulation {
 
   /** Time of the next event, or Infinity if there is none. */
   nextEventTime(): number {
-    return this.#queue.peek()?.time ?? Infinity;
+    return this.#scheduler.nextEventTime();
   }
 
   /** Schedules `action` to fire `delay` time units from now (0 means "now, after what is already due"). */
   schedule(delay: number, action: () => void, options?: ScheduleOptions): EventHandle {
     requireDelay(delay, 'schedule() delay');
-    return this.#add(this.#now + delay, action, options, 'schedule()');
+    return this.#add(this.now + delay, action, options, 'schedule()');
   }
 
   /** Schedules `action` to fire at model time `time`, which must not be in the past. */
   scheduleAt(time: number, action: () => void, options?: ScheduleOptions): EventHandle {
     requireFinite(time, 'scheduleAt() time');
-    if (time < this.#now) {
+    if (time < this.now) {
       throw new SimulationError(
         'EVENT_IN_PAST',
-        `scheduleAt() time ${String(time)} is in the past: the clock is already at ${String(this.#now)}`,
+        `scheduleAt() time ${String(time)} is in the past: the clock is already at ${String(this.now)}`,
       );
     }
     return this.#add(time, action, options, 'scheduleAt()');
@@ -144,7 +145,7 @@ export class Simulation {
 
   /** Starts taking snapshots of the model state every `every` time units (see snapshots.ts). */
   recordSnapshots<T extends JsonValue>(options: SnapshotOptions<T>): SnapshotRecorder<T> {
-    const recorder = new SnapshotSchedule(options, this.#now);
+    const recorder = new SnapshotSchedule(options, this.now);
     this.#recorders.push(recorder);
     this.#nextSnapshotTime = Math.min(this.#nextSnapshotTime, recorder.nextTime);
     return recorder;
@@ -154,9 +155,8 @@ export class Simulation {
   step(): boolean {
     this.#beginFiring('step()');
     try {
-      const event = this.#queue.pop();
-      if (event === undefined) return false;
-      this.#fire(event);
+      if (this.#scheduler.pendingEvents === 0) return false;
+      this.#fireNext();
       return true;
     } finally {
       this.#running = false;
@@ -170,17 +170,17 @@ export class Simulation {
    * event, and a model that keeps scheduling events runs until stop() is called.
    */
   run(until = Infinity): RunResult {
-    if (requireTimeLimit(until, 'run() until') < this.#now) {
+    if (requireTimeLimit(until, 'run() until') < this.now) {
       throw new SimulationError(
         'INVALID_ARGUMENT',
-        `run() until ${String(until)} is in the past: the clock is already at ${String(this.#now)}`,
+        `run() until ${String(until)} is in the past: the clock is already at ${String(this.now)}`,
       );
     }
     this.#beginFiring('run()');
     const eventsBefore = this.#eventsProcessed;
     try {
       const reason = this.#fireUntil(until);
-      return { reason, time: this.#now, events: this.#eventsProcessed - eventsBefore };
+      return { reason, time: this.now, events: this.#eventsProcessed - eventsBefore };
     } finally {
       this.#running = false;
     }
@@ -192,10 +192,10 @@ export class Simulation {
   }
 
   /** Validates the action and priority, then queues the event; `caller` names the method in errors. */
-  #add(time: number, action: () => void, options: ScheduleOptions | undefined, caller: string): ScheduledEvent {
+  #add(time: number, action: () => void, options: ScheduleOptions | undefined, caller: string): EventHandle {
     requireFunction(action, `${caller} action`);
     const priority = requireFinite(options?.priority ?? DEFAULT_PRIORITY, `${caller} priority`);
-    return this.#queue.add(time, priority, options?.label, action);
+    return this.#scheduler.modelEvents.schedule(time, priority, options?.label, action);
   }
 
   /** Marks the start of run() or step(), refusing one called from inside an event. */
@@ -211,10 +211,10 @@ export class Simulation {
   }
 
   #fireUntil(until: number): RunEndReason {
+    const scheduler = this.#scheduler;
     while (!this.#stopRequested) {
-      const event = this.#queue.pop(until);
-      if (event === undefined) return this.#finishRunAt(until);
-      this.#fire(event);
+      if (scheduler.pendingEvents === 0 || scheduler.nextEventTime() > until) return this.#finishRunAt(until);
+      this.#fireNext();
     }
     return 'stopped';
   }
@@ -223,26 +223,21 @@ export class Simulation {
   #finishRunAt(until: number): RunEndReason {
     // Nothing else happens up to `until`, so the state up to it is final.
     if (until === Infinity) {
-      this.#takeSnapshotsUpTo(this.#now, true);
+      this.#takeSnapshotsUpTo(this.now, true);
       return 'empty';
     }
     this.#takeSnapshotsUpTo(until, true);
-    this.#now = until;
+    this.#scheduler.now = until;
     return 'until';
   }
 
-  /** Fires an event already taken out of the queue. */
-  #fire(event: ScheduledEvent): void {
-    // Everything before `event.time` has happened: snapshots due before it are final.
-    if (event.time > this.#nextSnapshotTime) this.#takeSnapshotsUpTo(event.time, false);
-    this.#now = event.time;
+  /** Fires the next event; the queue is not empty. */
+  #fireNext(): void {
+    const time = this.#scheduler.nextEventTime();
+    // Everything before `time` has happened: snapshots due before it are final.
+    if (time > this.#nextSnapshotTime) this.#takeSnapshotsUpTo(time, false);
     this.#eventsProcessed++;
-    this.#trace?.(event);
-    try {
-      event.action();
-    } catch (error) {
-      throw describeFailure(event, error);
-    }
+    this.#scheduler.fireNext(this.#trace);
   }
 
   /** Takes, in time order, every snapshot due before `limit` (or at `limit` too, if `inclusive`). */
@@ -252,7 +247,7 @@ export class Simulation {
       const time = recorder?.nextTime ?? Infinity;
       this.#nextSnapshotTime = time;
       if (recorder === undefined || time > limit || (time === limit && !inclusive)) return;
-      this.#now = time;
+      this.#scheduler.now = time;
       recorder.captureNext();
     }
   }
@@ -270,16 +265,4 @@ export class Simulation {
 /** Like requireFinite, but also allows +Infinity, meaning "no limit". */
 function requireTimeLimit(value: number, what: string): number {
   return value === Infinity ? value : requireFinite(value, what);
-}
-
-/** Wraps an error thrown by an event action with the event's name and time. */
-function describeFailure(event: ScheduledEvent, error: unknown): SimulationError {
-  // A failed process or agent has already said which one failed and when.
-  if (error instanceof SimulationError && (error.code === 'PROCESS_FAILED' || error.code === 'AGENT_FAILED')) {
-    return error;
-  }
-  const name = event.label === undefined ? 'Event' : `Event "${event.label}"`;
-  return new SimulationError('EVENT_FAILED', `${name} failed at time ${String(event.time)}: ${messageOf(error)}`, {
-    cause: error,
-  });
 }

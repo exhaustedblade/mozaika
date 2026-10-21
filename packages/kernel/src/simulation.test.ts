@@ -262,7 +262,10 @@ describe('Simulation: cancelling events', () => {
       if (fired.length >= 2_000) return;
       const handles = Array.from({ length: 10 }, () => {
         const next = nextTag++;
-        return { tag: next, handle: sim.schedule(delays.exponential(1), () => tick(next)) };
+        const handle = sim.schedule(delays.exponential(1), () => {
+          tick(next);
+        });
+        return { tag: next, handle };
       });
       const keep = handles[Math.floor(delays.uniform(0, 10))];
       for (const { tag, handle } of handles) {
@@ -271,7 +274,9 @@ describe('Simulation: cancelling events', () => {
       }
       expect(sim.pendingEvents).toBe(1);
     };
-    sim.schedule(0, () => tick(-1));
+    sim.schedule(0, () => {
+      tick(-1);
+    });
     sim.run();
     expect(fired).toHaveLength(2_000);
     expect(fired.slice(1).every((tag) => kept.has(tag))).toBe(true);

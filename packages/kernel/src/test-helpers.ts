@@ -18,4 +18,3 @@ export function containing(text: string): unknown {
 export function describeEvent(event: EventInfo): string {
   return `${String(event.time)} ${String(event.priority)} #${String(event.seq)} ${event.label ?? ''}`;
 }
-

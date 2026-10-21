@@ -12,8 +12,9 @@
  * it. Composite waits are plain generators combined with `yield*`.
  */
 
-import { DEFAULT_PRIORITY } from './event-queue.js';
 import { describeValue, messageOf, requireDelay, requireFinite, SimulationError } from './errors.js';
+import { DEFAULT_PRIORITY } from './event-queue.js';
+import { type Scheduler, schedulerOf } from './scheduler.js';
 import { SignalWait } from './signal.js';
 import type { Simulation } from './simulation.js';
 
@@ -86,12 +87,16 @@ export class Process<TResult = unknown> {
   readonly id: number;
   readonly name: string;
   readonly #simulation: Simulation;
+  readonly #scheduler: Scheduler;
   readonly #body: ProcessBody<TResult>;
   #state: ProcessState = 'created';
   #result: TResult | undefined;
   #error: unknown;
 
-  /** Resumes the body with a value; created once, used as the action of every wake-up event. */
+  /**
+   * Resumes the body with a value. Created once per process and given to every
+   * wake-up event (wake-ups.ts), so that waking a process allocates nothing.
+   */
   readonly #wakeUp = (value?: unknown): void => {
     this.#run(value);
   };
@@ -99,12 +104,13 @@ export class Process<TResult = unknown> {
   /** Use `simulation.process()`; it assigns the id. */
   constructor(simulation: Simulation, body: ProcessBody<TResult>, id: number, options?: ProcessOptions) {
     this.#simulation = simulation;
+    this.#scheduler = schedulerOf(simulation);
     checkBody(body);
     this.#body = body;
     this.id = id;
     this.name = options?.name ?? `process-${String(id)}`;
     const priority = requireFinite(options?.priority ?? DEFAULT_PRIORITY, 'process() priority');
-    simulation.schedule(0, this.#wakeUp, { priority, label: this.name });
+    this.#wakeAfter(0, priority);
   }
 
   get state(): ProcessState {
@@ -149,7 +155,7 @@ export class Process<TResult = unknown> {
   #suspendOn(command: unknown): SimulationError | undefined {
     if (command instanceof Timeout) {
       this.#state = 'suspended';
-      this.#simulation.schedule(command.delay, this.#wakeUp, { priority: command.priority, label: this.name });
+      this.#wakeAfter(command.delay, command.priority);
       return undefined;
     }
     if (command instanceof SignalWait) {
@@ -167,5 +173,11 @@ export class Process<TResult = unknown> {
       'INVALID_YIELD',
       `Process "${this.name}" yielded ${describeValue(command)}; a process can yield timeout(...) or signal.wait()`,
     );
+  }
+
+  /** Schedules the wake-up of the process `delay` from now; delay and priority are already checked. */
+  #wakeAfter(delay: number, priority: number): void {
+    const scheduler = this.#scheduler;
+    scheduler.wakeUps.schedule(scheduler.now + delay, priority, this.#wakeUp, undefined, this.name);
   }
 }

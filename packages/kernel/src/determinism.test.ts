@@ -79,7 +79,10 @@ describe('repeatability by seed', () => {
     // Recorded with the kernel of commit 47903fe, before the event queue moved
     // to typed arrays (Ф0-4б): times, priorities, numbers and labels all match.
     const { trace } = runShop({ seed: 2026 });
-    expect({ events: trace.length, fingerprint: fingerprint(trace) }).toEqual({ events: 1097, fingerprint: '18f304dd' });
+    expect({ events: trace.length, fingerprint: fingerprint(trace) }).toEqual({
+      events: 1097,
+      fingerprint: '18f304dd',
+    });
   });
 
   it('keeps arrivals unchanged when another part of the model draws random numbers', () => {
