@@ -17,8 +17,10 @@
  * The memory ceiling is the goal of the kernel on typed arrays (Ф0-4б, П-27):
  * at most 250 bytes per agent. Memory hardly depends on the machine.
  *
- * The table also shows the kernel before Ф0-4б, as measured in CI, and how
- * many times faster the kernel is now; the ratio is meaningful in CI only.
+ * The table also shows the kernel before Ф0-4б, as measured in one CI run, and
+ * how many times faster the kernel is now. GitHub's runners differ: the same
+ * code runs up to 1.6 times faster on one than on another, so the ratio is
+ * only a rough guide; compare several runs (docs/DECISIONS.md, П-36).
  *
  * Run: pnpm bench
  */
@@ -143,6 +145,11 @@ for (const { scenario, timeUnitsPerSecond, bytesPerAgent } of measurements) {
 }
 
 const columns = (pick: (measurement: Measurement) => string): string[] => measurements.map(pick);
+/** Shown under the tables of the kernel and of the agents. */
+const BEFORE_NOTE =
+  '«До Ф0-4б» — ядро из объектов в одном прогоне CI (коммит 47903fe). Раннеры GitHub разные: ' +
+  'один и тот же код на них работает с разницей до 1,6 раза, поэтому отношение — ориентир; ' +
+  'сравнение по нескольким прогонам — в DECISIONS, П-36.';
 const report = [
   '',
   '### Агенты с диаграммой из двух состояний',
@@ -170,6 +177,7 @@ const report = [
     'Память — прирост кучи и буферов типизированных массивов после сборки мусора, ' +
     'вместе с ожидающими таймаутами в очереди событий.',
   `Потолок памяти: ${number.format(MAX_BYTES_PER_AGENT)} байт на агента.`,
+  BEFORE_NOTE,
 ];
 if (problems.length > 0) report.push('', `**${problems.join('; ')}.**`);
 console.log(report.join('\n'));
